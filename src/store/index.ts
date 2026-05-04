@@ -1,18 +1,20 @@
 import { create } from 'zustand'
 import {
-  Node,
-  Edge,
   addEdge,
   applyNodeChanges,
   applyEdgeChanges,
+} from '@xyflow/react'
+import type {
+  Node,
+  Edge,
   NodeChange,
   EdgeChange,
   Connection,
 } from '@xyflow/react'
-import { NodeData, EdgeData, AppSettings } from '../graph/types'
+import type { NodeData, EdgeData, AppSettings } from '../graph/types'
 import { validateGraph } from '../validation'
-import { ValidationIssue } from '../validation/types'
-import { SimResult } from '../simulation/types'
+import type { ValidationIssue } from '../validation/types'
+import type { SimResult } from '../simulation/types'
 
 interface AppState {
   nodes: Node<NodeData>[]

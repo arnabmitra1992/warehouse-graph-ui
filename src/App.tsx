@@ -1,121 +1,68 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { LeftToolbar } from './ui/LeftToolbar'
+import { FlowCanvas } from './ui/FlowCanvas'
+import { PropertiesPanel } from './ui/PropertiesPanel'
+import { IssuesPanel } from './ui/IssuesPanel'
+import { SimulationPanel } from './ui/SimulationPanel'
+import { TopBar } from './ui/TopBar'
+
+type BottomTab = 'issues' | 'simulation'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [activeTab, setActiveTab] = useState<BottomTab>('issues')
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="flex flex-col w-screen h-screen bg-gray-800 text-white overflow-hidden">
+      {/* Top bar */}
+      <TopBar />
 
-      <div className="ticks"></div>
+      {/* Main content area */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left toolbar */}
+        <LeftToolbar />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        {/* Center canvas + bottom panel */}
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Canvas fills remaining vertical space minus bottom panel */}
+          <div className="flex-1 min-h-0">
+            <FlowCanvas />
+          </div>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+          {/* Bottom panel */}
+          <div className="h-[220px] bg-gray-800 border-t border-gray-700 flex flex-col">
+            {/* Tabs */}
+            <div className="flex border-b border-gray-700 bg-gray-900 shrink-0">
+              <button
+                onClick={() => setActiveTab('issues')}
+                className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === 'issues'
+                    ? 'text-white border-b-2 border-blue-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Issues
+              </button>
+              <button
+                onClick={() => setActiveTab('simulation')}
+                className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === 'simulation'
+                    ? 'text-white border-b-2 border-blue-400'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Simulation
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {activeTab === 'issues' ? <IssuesPanel /> : <SimulationPanel />}
+            </div>
+          </div>
+        </div>
+
+        {/* Right properties panel */}
+        <PropertiesPanel />
+      </div>
+    </div>
   )
 }
 

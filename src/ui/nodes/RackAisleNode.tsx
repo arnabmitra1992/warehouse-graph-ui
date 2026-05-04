@@ -1,5 +1,6 @@
-import { Handle, Position, NodeProps, Node } from '@xyflow/react'
-import { NodeData } from '../../graph/types'
+import { Handle, Position } from '@xyflow/react' 
+import type { NodeProps, Node } from '@xyflow/react'
+import type { NodeData } from '../../graph/types'
 
 type RackAisleNodeType = Node<NodeData, 'rack_aisle'>
 

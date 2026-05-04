@@ -1,7 +1,7 @@
-import { Node, Edge } from '@xyflow/react'
-import { NodeData, EdgeData, AppSettings } from '../graph/types'
+import type { Node, Edge } from '@xyflow/react'
+import type { NodeData, EdgeData, AppSettings } from '../graph/types'
 import { getEdgeLength } from '../graph/utils'
-import { ValidationIssue } from './types'
+import type { ValidationIssue } from './types'
 
 export function validateGraph(
   nodes: Node<NodeData>[],

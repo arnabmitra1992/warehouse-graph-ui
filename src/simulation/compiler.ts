@@ -1,7 +1,7 @@
-import { Node, Edge } from '@xyflow/react'
-import { NodeData, EdgeData, AppSettings } from '../graph/types'
+import type { Node, Edge } from '@xyflow/react'
+import type { NodeData, EdgeData, AppSettings } from '../graph/types'
 import { getEdgeLength } from '../graph/utils'
-import { SimGraph } from './types'
+import type { SimGraph } from './types'
 
 export function compileGraph(
   nodes: Node<NodeData>[],

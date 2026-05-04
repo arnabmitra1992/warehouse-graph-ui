@@ -1,5 +1,5 @@
-import { Node, Edge } from '@xyflow/react'
-import { NodeData, EdgeData } from './types'
+import type { Node, Edge } from '@xyflow/react'
+import type { NodeData, EdgeData } from './types'
 
 export function getEdgeLength(
   edge: Edge<EdgeData>,

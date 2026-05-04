@@ -1,5 +1,6 @@
-import { SimGraph, SimResult, AisleResult, PathResult } from './types'
-import { dijkstra, reconstructPath, DijkstraEdge } from './dijkstra'
+import type { SimGraph, SimResult, AisleResult, PathResult } from './types'
+import { dijkstra, reconstructPath } from './dijkstra'
+import type { DijkstraEdge } from './dijkstra'
 
 const SPEED_XQE = 2.0  // m/s
 const SPEED_XNA = 1.5  // m/s
