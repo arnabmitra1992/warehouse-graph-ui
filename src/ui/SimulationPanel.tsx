@@ -18,10 +18,12 @@ export function SimulationPanel() {
     const nodeIds = [
       ...(aisle.handoverPath?.nodeIds ?? []),
       ...(aisle.rackPath?.nodeIds ?? []),
+      ...(aisle.outboundPath?.nodeIds ?? []),
     ]
     const edgeIds = [
       ...(aisle.handoverPath?.edgeIds ?? []),
       ...(aisle.rackPath?.edgeIds ?? []),
+      ...(aisle.outboundPath?.edgeIds ?? []),
     ]
     setHighlighted([...new Set(nodeIds)], [...new Set(edgeIds)])
   }
@@ -74,10 +76,12 @@ export function SimulationPanel() {
                 <th className="px-3 py-1.5 text-left">Aisle</th>
                 <th className="px-3 py-1.5 text-left">Dist to HO (m)</th>
                 <th className="px-3 py-1.5 text-left">Branch</th>
-                <th className="px-3 py-1.5 text-left">HO path (m)</th>
-                <th className="px-3 py-1.5 text-left">HO time (s)</th>
-                <th className="px-3 py-1.5 text-left">Rack path (m)</th>
-                <th className="px-3 py-1.5 text-left">Rack time (s)</th>
+                <th className="px-3 py-1.5 text-left">Inbound (m)</th>
+                <th className="px-3 py-1.5 text-left">Inbound (s)</th>
+                <th className="px-3 py-1.5 text-left">Storage (m)</th>
+                <th className="px-3 py-1.5 text-left">Storage (s)</th>
+                <th className="px-3 py-1.5 text-left">Outbound (m)</th>
+                <th className="px-3 py-1.5 text-left">Outbound (s)</th>
                 <th className="px-3 py-1.5 text-left">Status</th>
               </tr>
             </thead>
@@ -114,6 +118,12 @@ export function SimulationPanel() {
                   </td>
                   <td className="px-3 py-1.5 font-mono">
                     {aisle.rackPath ? aisle.rackPath.travelTimeS.toFixed(1) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono">
+                    {aisle.outboundPath ? aisle.outboundPath.distanceM.toFixed(1) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono">
+                    {aisle.outboundPath ? aisle.outboundPath.travelTimeS.toFixed(1) : '—'}
                   </td>
                   <td className="px-3 py-1.5">
                     {aisle.error ? (
