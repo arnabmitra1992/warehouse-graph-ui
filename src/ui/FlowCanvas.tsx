@@ -13,14 +13,18 @@ import '@xyflow/react/dist/style.css'
 import { useStore } from '../store'
 import type { NodeData, EdgeData } from '../graph/types'
 import { SourceGateNode } from './nodes/SourceGateNode'
+import { OutboundGateNode } from './nodes/OutboundGateNode'
 import { HandoverNode } from './nodes/HandoverNode'
 import { RackAisleNode } from './nodes/RackAisleNode'
+import { BulkStorageNode } from './nodes/BulkStorageNode'
 import { TurnNode } from './nodes/TurnNode'
 
 const nodeTypes: NodeTypes = {
   source_gate: SourceGateNode,
+  outbound_gate: OutboundGateNode,
   handover: HandoverNode,
   rack_aisle: RackAisleNode,
+  bulk_storage: BulkStorageNode,
   turn: TurnNode,
 }
 

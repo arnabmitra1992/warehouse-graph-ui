@@ -12,7 +12,7 @@ export function validateGraph(
 
   if (nodes.length === 0 && edges.length === 0) return issues
 
-  // E-SCEN-001
+  // E-SCEN-001: exactly one source_gate
   const sourceGates = nodes.filter(n => n.data?.kind === 'source_gate')
   if (sourceGates.length !== 1) {
     issues.push({
@@ -20,6 +20,17 @@ export function validateGraph(
       severity: 'error',
       message: 'Rack scenario requires exactly one source_gate node.',
       nodeIds: sourceGates.map(n => n.id),
+    })
+  }
+
+  // E-SCEN-002: exactly one outbound_gate (required)
+  const outboundGates = nodes.filter(n => n.data?.kind === 'outbound_gate')
+  if (outboundGates.length !== 1) {
+    issues.push({
+      code: 'E-SCEN-002',
+      severity: 'error',
+      message: `Rack scenario requires exactly one outbound_gate node (found ${outboundGates.length}).`,
+      nodeIds: outboundGates.map(n => n.id),
     })
   }
 
@@ -269,6 +280,40 @@ export function validateGraph(
         severity: 'error',
         message: `Aisle ${aisleId}: cannot compute distance source_gate\u2192handover (handover unreachable on non-rack network).`,
       })
+    }
+  }
+
+  // Bulk storage reachability: must be reachable from source_gate on non-rack edges
+  const bulkStorageNodes = nodes.filter(n => n.data?.kind === 'bulk_storage')
+  if (sourceGates.length === 1 && bulkStorageNodes.length > 0) {
+    const sg = sourceGates[0]
+    const nonRackAdj = buildAdjacency(nonRackEdges)
+    const distFromSG = dijkstra(nonRackAdj, sg.id)
+    for (const bs of bulkStorageNodes) {
+      if (!distFromSG.has(bs.id)) {
+        issues.push({
+          code: 'E-BULK-001',
+          severity: 'error',
+          message: `bulk_storage node ${bs.id} is not reachable from source_gate on non-rack edges.`,
+          nodeIds: [bs.id],
+        })
+      }
+    }
+    // If outbound gate exists, bulk_storage must also reach outbound_gate
+    if (outboundGates.length === 1) {
+      const og = outboundGates[0]
+      for (const bs of bulkStorageNodes) {
+        if (!distFromSG.has(bs.id)) continue // already flagged above
+        const distFromBS = dijkstra(nonRackAdj, bs.id)
+        if (!distFromBS.has(og.id)) {
+          issues.push({
+            code: 'E-BULK-002',
+            severity: 'error',
+            message: `bulk_storage node ${bs.id} cannot reach outbound_gate on non-rack edges.`,
+            nodeIds: [bs.id, og.id],
+          })
+        }
+      }
     }
   }
 

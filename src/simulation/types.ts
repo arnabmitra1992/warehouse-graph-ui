@@ -32,6 +32,7 @@ export interface AisleResult {
   branch: 'XQE' | 'XPL' | 'unknown'
   handoverPath?: PathResult
   rackPath?: PathResult
+  outboundPath?: PathResult
   error?: string
 }
 

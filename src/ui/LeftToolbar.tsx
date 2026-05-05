@@ -2,8 +2,10 @@ import React from 'react'
 
 const nodeTypes = [
   { kind: 'source_gate', label: 'Source Gate', color: 'bg-green-500' },
+  { kind: 'outbound_gate', label: 'Outbound Gate', color: 'bg-red-500' },
   { kind: 'handover', label: 'Handover', color: 'bg-blue-500' },
   { kind: 'rack_aisle', label: 'Rack Aisle', color: 'bg-orange-400' },
+  { kind: 'bulk_storage', label: 'Bulk Storage', color: 'bg-purple-500' },
   { kind: 'turn', label: 'Turn', color: 'bg-gray-400' },
 ] as const
 

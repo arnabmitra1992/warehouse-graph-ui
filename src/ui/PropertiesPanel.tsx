@@ -100,6 +100,107 @@ function NodeProperties({
           />
         </Field>
       )}
+      {data.kind === 'rack_aisle' && (
+        <>
+          <div className="text-xs text-gray-400 font-semibold border-t border-gray-600 pt-2 mt-1">Rack Configuration</div>
+          <Field label="Rack Length (m)">
+            <input
+              className={inputCls()}
+              type="number"
+              step={0.1}
+              min={0.1}
+              value={data.rackLengthM ?? ''}
+              placeholder="e.g. 30.0"
+              onChange={(e) =>
+                onUpdate({ rackLengthM: e.target.value ? parseFloat(e.target.value) : undefined })
+              }
+            />
+          </Field>
+          <Field label="Rack Height (m)">
+            <input
+              className={inputCls()}
+              type="number"
+              step={0.1}
+              min={0.1}
+              value={data.rackHeightM ?? ''}
+              placeholder="e.g. 10.0"
+              onChange={(e) =>
+                onUpdate({ rackHeightM: e.target.value ? parseFloat(e.target.value) : undefined })
+              }
+            />
+          </Field>
+          <Field label="Levels">
+            <input
+              className={inputCls()}
+              type="number"
+              min={1}
+              step={1}
+              value={data.levels ?? ''}
+              placeholder="e.g. 5"
+              onChange={(e) =>
+                onUpdate({ levels: e.target.value ? parseInt(e.target.value) : undefined })
+              }
+            />
+          </Field>
+          <Field label="Bays (optional)">
+            <input
+              className={inputCls()}
+              type="number"
+              min={1}
+              step={1}
+              value={data.bays ?? ''}
+              placeholder="e.g. 20"
+              onChange={(e) =>
+                onUpdate({ bays: e.target.value ? parseInt(e.target.value) : undefined })
+              }
+            />
+          </Field>
+          <Field label="Depth (m, optional)">
+            <input
+              className={inputCls()}
+              type="number"
+              step={0.1}
+              min={0.1}
+              value={data.depth ?? ''}
+              placeholder="e.g. 1.1"
+              onChange={(e) =>
+                onUpdate({ depth: e.target.value ? parseFloat(e.target.value) : undefined })
+              }
+            />
+          </Field>
+        </>
+      )}
+      {data.kind === 'bulk_storage' && (
+        <>
+          <div className="text-xs text-gray-400 font-semibold border-t border-gray-600 pt-2 mt-1">Bulk Storage Configuration</div>
+          <Field label="Capacity (m³, optional)">
+            <input
+              className={inputCls()}
+              type="number"
+              step={1}
+              min={0}
+              value={data.capacityM3 ?? ''}
+              placeholder="e.g. 5000"
+              onChange={(e) =>
+                onUpdate({ capacityM3: e.target.value ? parseFloat(e.target.value) : undefined })
+              }
+            />
+          </Field>
+          <Field label="Area (m², optional)">
+            <input
+              className={inputCls()}
+              type="number"
+              step={1}
+              min={0}
+              value={data.areaM2 ?? ''}
+              placeholder="e.g. 1000"
+              onChange={(e) =>
+                onUpdate({ areaM2: e.target.value ? parseFloat(e.target.value) : undefined })
+              }
+            />
+          </Field>
+        </>
+      )}
     </div>
   )
 }
