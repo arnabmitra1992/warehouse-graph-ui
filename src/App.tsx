@@ -10,6 +10,7 @@ type BottomTab = 'issues' | 'simulation'
 
 function App() {
   const [activeTab, setActiveTab] = useState<BottomTab>('issues')
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
 
   return (
     <div className="flex flex-col w-screen h-screen bg-gray-800 text-white overflow-hidden">
@@ -28,8 +29,26 @@ function App() {
             <FlowCanvas />
           </div>
 
+          <div
+            className="h-1 cursor-row-resize bg-gray-700 hover:bg-blue-500"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              const startY = e.clientY
+              const startH = bottomPanelHeight
+              const onMove = (ev: MouseEvent) => {
+                const next = Math.max(140, Math.min(520, startH - (ev.clientY - startY)))
+                setBottomPanelHeight(next)
+              }
+              const onUp = () => {
+                window.removeEventListener('mousemove', onMove)
+                window.removeEventListener('mouseup', onUp)
+              }
+              window.addEventListener('mousemove', onMove)
+              window.addEventListener('mouseup', onUp)
+            }}
+          />
           {/* Bottom panel */}
-          <div className="h-[220px] bg-gray-800 border-t border-gray-700 flex flex-col">
+          <div className="bg-gray-800 border-t border-gray-700 flex flex-col" style={{ height: bottomPanelHeight }}>
             {/* Tabs */}
             <div className="flex border-b border-gray-700 bg-gray-900 shrink-0">
               <button

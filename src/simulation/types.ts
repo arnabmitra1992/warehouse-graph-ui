@@ -12,6 +12,7 @@ export interface SimNode {
   id: string
   kind: string
   aisleId?: number
+  storageType?: 'rack' | 'ground_storage' | 'ground_stacking'
 }
 
 export interface SimGraph {
@@ -30,6 +31,9 @@ export interface AisleResult {
   aisleId: number
   distanceToHandover: number
   branch: 'XQE' | 'XPL' | 'unknown'
+  handoverNodeId?: string
+  assignedTasks?: number
+  storageNodeIds?: string[]
   handoverPath?: PathResult
   rackPath?: PathResult
   error?: string
@@ -37,4 +41,17 @@ export interface AisleResult {
 
 export interface SimResult {
   aisles: AisleResult[]
+  storageTaskBreakdown?: Array<{
+    storageNodeId: string
+    tasksPerDay: number
+    aisleId?: number
+    handoverNodeId?: string
+    branch: 'XQE' | 'XPL' | 'unknown'
+  }>
+  diagnostics?: {
+    excludedStorages: Array<{
+      storageNodeId: string
+      reason: string
+    }>
+  }
 }

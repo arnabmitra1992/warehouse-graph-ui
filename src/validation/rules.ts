@@ -23,39 +23,45 @@ export function validateGraph(
     })
   }
 
+  const storageTypes = settings.simulator.storageTypesInUse
+  const useRack = storageTypes.includes('rack')
+  const useGround = storageTypes.includes('ground_storage') || storageTypes.includes('ground_stacking')
+
   // E-RACK-001
   const rackAisles = nodes.filter(n => n.data?.kind === 'rack_aisle')
-  if (rackAisles.length === 0) {
+  if (useRack && rackAisles.length === 0) {
     issues.push({
       code: 'E-RACK-001',
       severity: 'error',
-      message: 'Rack scenario requires at least one rack_aisle node.',
+      message: 'Storage type is rack, but no rack_aisle node exists.',
+    })
+  }
+
+  const groundNodes = nodes.filter(n => n.data?.kind === 'ground_storage')
+  if (useGround && groundNodes.length === 0) {
+    issues.push({
+      code: 'E-GS-001',
+      severity: 'error',
+      message: 'Ground storage/stacking mode selected, but no ground_storage node exists.',
+    })
+  }
+
+  const outboundGates = nodes.filter(n => n.data?.kind === 'outbound_gate')
+  if (outboundGates.length === 0) {
+    issues.push({
+      code: 'W-FLOW-001',
+      severity: 'warning',
+      message: 'No outbound_gate node found. Add one to model outbound material flow explicitly.',
     })
   }
 
   // Collect unique aisle IDs from rack_aisle nodes
-  const aisleIds = Array.from(new Set(
-    rackAisles.map(n => n.data?.aisleId).filter((id): id is number => id != null)
-  ))
-
-  // Handover checks per aisle
-  for (const aisleId of aisleIds) {
-    const handovers = nodes.filter(n => n.data?.kind === 'handover' && n.data?.aisleId === aisleId)
-    if (handovers.length === 0) {
-      issues.push({
-        code: 'E-HO-001',
-        severity: 'error',
-        message: `Aisle ${aisleId} is missing a handover node.`,
-      })
-    } else if (handovers.length > 1) {
-      issues.push({
-        code: 'E-HO-002',
-        severity: 'error',
-        message: `Aisle ${aisleId} has multiple handover nodes (expected exactly one).`,
-        nodeIds: handovers.map(n => n.id),
-      })
-    }
-  }
+  const aisleIds = Array.from(new Set([
+    ...rackAisles.map(n => n.data?.aisleId).filter((id): id is number => id != null),
+    ...edges
+      .filter((e) => (e.data?.preset === 'rack_aisle' || e.data?.preset === 'storage_aisle') && e.data?.aisleId != null)
+      .map((e) => e.data!.aisleId as number),
+  ]))
 
   // Edge field checks
   for (const edge of edges) {
@@ -87,6 +93,25 @@ export function validateGraph(
           edgeIds: [edge.id],
         })
       }
+    }
+    if (!edge.data.priorityStream) {
+      issues.push({
+        code: (edge.data.preset === 'rack_aisle' || edge.data.preset === 'storage_aisle') ? 'W-PRI-RA-001' : 'W-PRI-NR-001',
+        severity: 'warning',
+        message:
+          (edge.data.preset === 'rack_aisle' || edge.data.preset === 'storage_aisle')
+            ? `Storage aisle edge ${edge.id} has no priority stream. Set inbound/outbound/shared.`
+            : `Non-aisle edge ${edge.id} has no priority stream. Set inbound/outbound/shared.`,
+        edgeIds: [edge.id],
+      })
+    }
+    if ((edge.data.preset === 'head_aisle' || edge.data.preset === 'rack_aisle' || edge.data.preset === 'storage_aisle') && !edge.data.aisleId) {
+      issues.push({
+        code: 'W-AISLE-ID-001',
+        severity: 'warning',
+        message: `Aisle-class edge ${edge.id} has no aisle_id; set aisle_id to group edges that belong to the same aisle.`,
+        edgeIds: [edge.id],
+      })
     }
   }
 
@@ -134,7 +159,7 @@ export function validateGraph(
     xqeEdges.length > 0 && xnaEdges.length === 0 ? 'XQE' : null
 
   // Build adjacency for non-rack edges (for reachability checks)
-  const nonRackEdges = edges.filter(e => e.data?.preset !== 'rack_aisle')
+  const nonRackEdges = edges.filter(e => e.data?.preset !== 'rack_aisle' && e.data?.preset !== 'storage_aisle')
 
   function buildAdjacency(edgeList: Edge<EdgeData>[], includeWidthFilter?: number): Map<string, {neighbor: string, length: number, edgeId: string}[]> {
     const adj = new Map<string, {neighbor: string, length: number, edgeId: string}[]>()
@@ -176,11 +201,79 @@ export function validateGraph(
     const sg = sourceGates[0]
     const nonRackAdj = buildAdjacency(nonRackEdges)
     const distFromSG = dijkstra(nonRackAdj, sg.id)
+    const allAdj = buildAdjacency(edges)
+    const distAllFromSG = dijkstra(allAdj, sg.id)
 
+    if (useGround) {
+      const groundStorageNodes = nodes.filter(n => n.data?.kind === 'ground_storage')
+      const minGroundDist = Math.min(...groundStorageNodes.map((n) => distAllFromSG.get(n.id) ?? Number.POSITIVE_INFINITY))
+      if (Number.isFinite(minGroundDist) && minGroundDist >= 50) {
+        const hasAnyHandover = nodes.some(n => n.data?.kind === 'handover')
+        if (!hasAnyHandover) {
+          issues.push({
+            code: 'E-HO-GS-001',
+            severity: 'error',
+            message: `Ground storage path is ${minGroundDist.toFixed(1)}m (>=50m): add handover for XPL horizontal transport.`,
+          })
+        }
+      }
+    }
+
+    const allHandovers = nodes.filter(n => n.data?.kind === 'handover')
     for (const aisleId of aisleIds) {
-      const handovers = nodes.filter(n => n.data?.kind === 'handover' && n.data?.aisleId === aisleId)
-      if (handovers.length !== 1) continue
-      const ho = handovers[0]
+      const storageEdgeNodeIds = new Set(
+        edges
+          .filter((e) => (e.data?.preset === 'rack_aisle' || e.data?.preset === 'storage_aisle') && e.data?.aisleId === aisleId)
+          .flatMap((e) => [e.source, e.target])
+      )
+      const aisleStorageNodes = nodes.filter((n) =>
+        (n.data?.kind === 'rack_aisle' && n.data?.aisleId === aisleId) ||
+        (n.data?.kind === 'ground_storage' && storageEdgeNodeIds.has(n.id))
+      )
+      if (aisleStorageNodes.length === 0) {
+        issues.push({
+          code: 'W-AISLE-EMPTY-001',
+          severity: 'warning',
+          message: `Aisle ${aisleId}: no storage node is connected/tagged for this aisle_id.`,
+        })
+        continue
+      }
+      const sourceToRackDist = aisleStorageNodes
+        .map((n) => distAllFromSG.get(n.id))
+        .filter((d): d is number => d != null)
+        .reduce((min, d) => Math.min(min, d), Number.POSITIVE_INFINITY)
+      const needsHandover = (sourceToRackDist ?? 0) >= 50
+
+      if (needsHandover && allHandovers.length === 0) {
+        const distLabel = Number.isFinite(sourceToRackDist) ? sourceToRackDist.toFixed(1) : 'n/a'
+        issues.push({
+          code: 'E-HO-001',
+          severity: 'error',
+          message: `Aisle ${aisleId}: handover required by 50m rule (source->storage ${distLabel}m).`,
+        })
+        continue
+      }
+      if (allHandovers.length === 0) {
+        // No handover is valid under 50m: direct XQE/XNA storage leg checks still apply.
+        continue
+      }
+      const aisleTagged = allHandovers.filter((h) => h.data?.aisleId === aisleId)
+      const shared = allHandovers.filter((h) => h.data?.aisleId == null)
+      const preferred = aisleTagged.length > 0 ? aisleTagged : shared
+      const candidates = preferred.length > 0 ? preferred : allHandovers
+      const candidate = candidates
+        .map((h) => ({ h, d: distFromSG.get(h.id) }))
+        .filter((x): x is { h: (typeof candidates)[number]; d: number } => x.d != null)
+        .sort((a, b) => a.d - b.d)[0]
+      if (!candidate) {
+        issues.push({
+          code: 'E-HO-010',
+          severity: 'error',
+          message: `Aisle ${aisleId}: no reachable handover from source_gate on non-storage network.`,
+        })
+        continue
+      }
+      const ho = candidate.h
 
       if (!distFromSG.has(ho.id)) {
         issues.push({
@@ -192,41 +285,26 @@ export function validateGraph(
         continue
       }
 
-      const distance = distFromSG.get(ho.id)!
-
       // Branching check
-      if (distance <= 50) {
-        // XQE path: need non-rack edges with width >= 2.84
-        const xqeAdj = buildAdjacency(nonRackEdges, 2.84)
-        const xqeDist = dijkstra(xqeAdj, sg.id)
-        if (!xqeDist.has(ho.id)) {
-          issues.push({
-            code: 'E-BR-010',
-            severity: 'error',
-            message: `Aisle ${aisleId} (distance=${distance.toFixed(1)}m \u2264 50m): no feasible XQE path source_gate\u2192handover on non-rack edges (requires width \u2265 2.84m).`,
-            nodeIds: [sg.id, ho.id],
-          })
-        }
-      } else {
-        // XPL path: need non-rack edges with width >= 2.60
+      if (needsHandover) {
+        // If handover is required by source->storage distance, SG->HO must be XPL-capable.
         const xplAdj = buildAdjacency(nonRackEdges, 2.60)
         const xplDist = dijkstra(xplAdj, sg.id)
         if (!xplDist.has(ho.id)) {
           issues.push({
             code: 'E-BR-011',
             severity: 'error',
-            message: `Aisle ${aisleId} (distance=${distance.toFixed(1)}m > 50m): no feasible XPL path source_gate\u2192handover on non-rack edges (requires width \u2265 2.60m).`,
+            message: `Aisle ${aisleId}: handover required by 50m rule but no feasible XPL path source_gate\u2192handover (requires width \u2265 2.60m).`,
             nodeIds: [sg.id, ho.id],
           })
         }
       }
 
       // Storage leg feasibility
-      const aisleRackNodes = rackAisles.filter(n => n.data?.aisleId === aisleId)
-      for (const rackNode of aisleRackNodes) {
+      for (const rackNode of aisleStorageNodes) {
         // Build adj for storage leg: non-rack edges + rack_aisle edges with matching aisleId
         const allowedEdges = edges.filter(e =>
-          e.data?.preset !== 'rack_aisle' || e.data?.aisleId === aisleId
+          (e.data?.preset !== 'rack_aisle' && e.data?.preset !== 'storage_aisle') || e.data?.aisleId === aisleId
         )
 
         if (siteMode === 'XQE') {

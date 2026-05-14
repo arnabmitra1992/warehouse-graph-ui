@@ -11,7 +11,7 @@ import type {
   EdgeChange,
   Connection,
 } from '@xyflow/react'
-import type { NodeData, EdgeData, AppSettings } from '../graph/types'
+import type { NodeData, EdgeData, AppSettings, LayoutUnderlay } from '../graph/types'
 import { validateGraph } from '../validation'
 import type { ValidationIssue } from '../validation/types'
 import type { SimResult } from '../simulation/types'
@@ -20,6 +20,7 @@ interface AppState {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
   settings: AppSettings
+  underlay: LayoutUnderlay | null
   issues: ValidationIssue[]
   simResult: SimResult | null
   selectedNodeId: string | null
@@ -31,14 +32,17 @@ interface AppState {
   onEdgesChange: (changes: EdgeChange[]) => void
   onConnect: (connection: Connection) => void
   addNode: (node: Node<NodeData>) => void
+  removeNode: (id: string) => void
   updateNodeData: (id: string, data: Partial<NodeData>) => void
+  removeEdge: (id: string) => void
   updateEdgeData: (id: string, data: Partial<EdgeData>) => void
   setSelectedNode: (id: string | null) => void
   setSelectedEdge: (id: string | null) => void
   setSimResult: (result: SimResult | null) => void
   setHighlighted: (nodeIds: string[], edgeIds: string[]) => void
   updateSettings: (settings: Partial<AppSettings>) => void
-  importGraph: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[], settings: AppSettings) => void
+  setUnderlay: (underlay: LayoutUnderlay | null) => void
+  importGraph: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[], settings: AppSettings, underlay?: LayoutUnderlay | null) => void
 }
 
 function runValidation(nodes: Node<NodeData>[], edges: Edge<EdgeData>[], settings: AppSettings): ValidationIssue[] {
@@ -48,7 +52,29 @@ function runValidation(nodes: Node<NodeData>[], edges: Edge<EdgeData>[], setting
 export const useStore = create<AppState>((set, get) => ({
   nodes: [],
   edges: [],
-  settings: { metersPerPixel: 0.05 },
+  settings: {
+    metersPerPixel: 0.05,
+    simulator: {
+      storageTypesInUse: ['rack'],
+      inboundDailyPallets: 500,
+      outboundDailyPallets: 500,
+      operatingHours: 16,
+      utilizationTarget: 0.75,
+      rackDailyPallets: 500,
+      stackingDailyPallets: 200,
+      rackLevels: 3,
+      shelfHeightSpacingMm: 1300,
+      positionSpacingMm: 950,
+      stackingRows: 10,
+      stackingColumns: 12,
+      stackingLevels: 3,
+      blockStoragePolicy: 'lane_sequence',
+      trafficControlEnabled: false,
+      intersectionCount: 0,
+      intersectionCycleTimeS: 30,
+    },
+  },
+  underlay: null,
   issues: [],
   simResult: null,
   selectedNodeId: null,
@@ -74,6 +100,7 @@ export const useStore = create<AppState>((set, get) => ({
         preset: 'connector',
         widthM: 3.0,
         lengthMode: 'auto',
+        priorityStream: 'shared',
       },
     } as Edge<EdgeData>
     const edges = addEdge(newEdge, get().edges) as Edge<EdgeData>[]
@@ -83,6 +110,16 @@ export const useStore = create<AppState>((set, get) => ({
   addNode: (node) => {
     const nodes = [...get().nodes, node]
     set({ nodes, issues: runValidation(nodes, get().edges, get().settings) })
+  },
+  removeNode: (id) => {
+    const nodes = get().nodes.filter((n) => n.id !== id)
+    const edges = get().edges.filter((e) => e.source !== id && e.target !== id)
+    set({
+      nodes,
+      edges,
+      selectedNodeId: get().selectedNodeId === id ? null : get().selectedNodeId,
+      issues: runValidation(nodes, edges, get().settings),
+    })
   },
 
   updateNodeData: (id, data) => {
@@ -94,6 +131,14 @@ export const useStore = create<AppState>((set, get) => ({
     const edges = get().edges.map(e => e.id === id ? { ...e, data: { ...e.data!, ...data } } : e)
     set({ edges, issues: runValidation(get().nodes, edges, get().settings) })
   },
+  removeEdge: (id) => {
+    const edges = get().edges.filter((e) => e.id !== id)
+    set({
+      edges,
+      selectedEdgeId: get().selectedEdgeId === id ? null : get().selectedEdgeId,
+      issues: runValidation(get().nodes, edges, get().settings),
+    })
+  },
 
   setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
@@ -104,15 +149,25 @@ export const useStore = create<AppState>((set, get) => ({
   }),
 
   updateSettings: (newSettings) => {
-    const settings = { ...get().settings, ...newSettings }
+    const settings = {
+      ...get().settings,
+      ...newSettings,
+      simulator: {
+        ...get().settings.simulator,
+        ...(newSettings.simulator ?? {}),
+      },
+    }
     set({ settings, issues: runValidation(get().nodes, get().edges, settings) })
   },
 
-  importGraph: (nodes, edges, settings) => {
+  setUnderlay: (underlay) => set({ underlay }),
+
+  importGraph: (nodes, edges, settings, underlay = null) => {
     set({
       nodes,
       edges,
       settings,
+      underlay,
       issues: runValidation(nodes, edges, settings),
       simResult: null,
     })

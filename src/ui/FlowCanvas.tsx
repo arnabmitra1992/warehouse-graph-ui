@@ -7,6 +7,7 @@ import {
   useReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  ViewportPortal,
 } from '@xyflow/react'
 import type { NodeTypes, Node, Edge } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -16,12 +17,16 @@ import { SourceGateNode } from './nodes/SourceGateNode'
 import { HandoverNode } from './nodes/HandoverNode'
 import { RackAisleNode } from './nodes/RackAisleNode'
 import { TurnNode } from './nodes/TurnNode'
+import { OutboundGateNode } from './nodes/OutboundGateNode'
+import { GroundStorageNode } from './nodes/GroundStorageNode'
 
 const nodeTypes: NodeTypes = {
   source_gate: SourceGateNode,
   handover: HandoverNode,
   rack_aisle: RackAisleNode,
   turn: TurnNode,
+  outbound_gate: OutboundGateNode,
+  ground_storage: GroundStorageNode,
 }
 
 function FlowCanvasInner() {
@@ -36,6 +41,7 @@ function FlowCanvasInner() {
     setSelectedEdge,
     highlightedNodeIds,
     highlightedEdgeIds,
+    underlay,
   } = useStore()
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
@@ -61,7 +67,11 @@ function FlowCanvasInner() {
         id: `node-${Date.now()}`,
         type: kind,
         position,
-        data: { kind, label: kind === 'source_gate' ? 'SG' : undefined },
+        data: {
+          kind,
+          label: kind === 'source_gate' ? 'SG' : kind === 'outbound_gate' ? 'OG' : undefined,
+          storageType: kind === 'rack_aisle' ? 'rack' : kind === 'ground_storage' ? 'ground_storage' : undefined,
+        },
       }
 
       addNode(newNode)
@@ -107,6 +117,8 @@ function FlowCanvasInner() {
         ? '#f59e0b'
         : e.data?.preset === 'rack_aisle'
         ? '#f97316'
+        : e.data?.preset === 'storage_aisle'
+        ? '#14b8a6'
         : e.data?.preset === 'head_aisle'
         ? '#3b82f6'
         : e.data?.preset === 'corridor'
@@ -117,7 +129,7 @@ function FlowCanvasInner() {
   }))
 
   return (
-    <div ref={reactFlowWrapper} className="flex-1 h-full">
+    <div ref={reactFlowWrapper} className="relative flex-1 h-full">
       <ReactFlow
         nodes={styledNodes}
         edges={styledEdges}
@@ -132,7 +144,31 @@ function FlowCanvasInner() {
         nodeTypes={nodeTypes}
         selectionMode={SelectionMode.Partial}
         fitView
+        className="relative z-10"
       >
+        {underlay && (
+          <ViewportPortal>
+            <div className="pointer-events-none absolute left-0 top-0 -z-10">
+              {underlay.mimeType === 'application/pdf' ? (
+                <embed
+                  src={underlay.dataUrl}
+                  type="application/pdf"
+                  width={1600}
+                  height={1200}
+                  style={{ opacity: underlay.opacity }}
+                />
+              ) : (
+                <img
+                  src={underlay.dataUrl}
+                  alt={underlay.name}
+                  width={1600}
+                  height={1200}
+                  style={{ opacity: underlay.opacity }}
+                />
+              )}
+            </div>
+          </ViewportPortal>
+        )}
         <Background />
         <Controls />
         <MiniMap nodeStrokeWidth={3} />
