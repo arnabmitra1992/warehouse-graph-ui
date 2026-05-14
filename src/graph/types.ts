@@ -29,6 +29,7 @@ export interface LayoutUnderlay {
 
 export interface SimulatorInputs {
   storageTypesInUse: Array<'rack' | 'ground_storage' | 'ground_stacking'>
+  randomSeed?: number
   inboundDailyPallets: number
   outboundDailyPallets: number
   operatingHours: number

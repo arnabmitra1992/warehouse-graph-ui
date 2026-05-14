@@ -15,6 +15,8 @@ function normalizeReportText(raw: string): string {
 interface BackendSimulationResponse {
   ok: boolean
   result?: {
+    required_xpl_fleet_count?: number
+    xpl_required_fleet_count?: number
     cycle_times_s?: {
       xpl201_handover?: number
       xqe122_rack_avg?: number
@@ -22,6 +24,8 @@ interface BackendSimulationResponse {
     }
     fleet_sizes?: {
       xpl201?: number
+      required_xpl_fleet_count?: number
+      xpl_required_fleet_count?: number
       xqe122_rack?: number
       xqe122_stacking?: number
       rack_vehicle_type?: string
@@ -126,6 +130,7 @@ export function SimulationPanel() {
         body: JSON.stringify({
           config,
           traffic_control: settings.simulator.trafficControlEnabled,
+          random_seed: settings.simulator.randomSeed ?? null,
           workload_buckets: {
             horizontal_xpl: horizontalXpl,
             horizontal_xqe: horizontalXqe,
@@ -157,6 +162,7 @@ export function SimulationPanel() {
     reportLines.push('')
     if (backendResult) {
       reportLines.push('Backend Result')
+      reportLines.push(`Required XPL Fleet: ${xplRequiredFleetCount ?? 0}`)
       reportLines.push(`Fleet Total: ${fleet?.total ?? 0}`)
       reportLines.push(`XPL Fleet: ${fleet?.xpl201 ?? 0}`)
       reportLines.push(`Rack Fleet: ${fleet?.xqe122_rack ?? 0}`)
@@ -197,6 +203,11 @@ export function SimulationPanel() {
   const fleet = backendResult?.fleet_sizes
   const cycles = backendResult?.cycle_times_s
   const outbound = backendResult?.outbound_workflow
+  const xplRequiredFleetCount = backendResult?.required_xpl_fleet_count
+    ?? backendResult?.xpl_required_fleet_count
+    ?? fleet?.required_xpl_fleet_count
+    ?? fleet?.xpl_required_fleet_count
+    ?? fleet?.xpl201
   const useRack = settings.simulator.storageTypesInUse.includes('rack')
   const useGround = settings.simulator.storageTypesInUse.includes('ground_storage') || settings.simulator.storageTypesInUse.includes('ground_stacking')
 
@@ -258,6 +269,9 @@ export function SimulationPanel() {
         {backendResult && (
           <div className="px-3 py-2 border-b border-gray-700 bg-gray-800 text-xs text-gray-200">
             <div className="font-semibold text-gray-300 mb-1">Backend Simulator Result</div>
+            <div className="mb-2 bg-amber-900/40 text-amber-100 rounded px-3 py-2 border border-amber-700 font-semibold">
+              Required XPL Fleet Count: {xplRequiredFleetCount ?? '—'}
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Fleet Total: {fleet?.total ?? 0}</div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Fleet: {fleet?.xpl201 ?? 0}</div>

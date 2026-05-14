@@ -56,6 +56,7 @@ export const useStore = create<AppState>((set, get) => ({
     metersPerPixel: 0.05,
     simulator: {
       storageTypesInUse: ['rack'],
+      randomSeed: 42,
       inboundDailyPallets: 500,
       outboundDailyPallets: 500,
       operatingHours: 16,

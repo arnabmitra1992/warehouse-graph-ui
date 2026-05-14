@@ -9,6 +9,8 @@ A standalone **Vite + React + TypeScript** application for drawing and simulatin
 - **Edge types** with configurable width, length (auto from positions or manual), preset (`rack_aisle`, `head_aisle`, `corridor`, `connector`), priority stream, and intersection count
 - **Always-on validation** – checks rack mode consistency (XNA / XQE), scenario rules, branching distances, feasibility of handover paths and storage-leg paths
 - **Simulation** – Dijkstra-based routing computes shortest feasible paths and travel times per aisle, with result highlighting on the canvas
+- **Deterministic backend simulation runs** – optional `Random Seed` input is sent on every backend run request
+- **Backend fleet sizing visibility** – required XPL fleet count is highlighted in backend simulation results
 - **Import / Export JSON** – preserves full graph and settings; validated on import with Zod
 - **GitHub Pages deployment** ready
 
@@ -39,6 +41,12 @@ Open [http://localhost:5173/warehouse-graph-ui/](http://localhost:5173/warehouse
 5. Switch to the **Simulation** tab and click **▶ Run Simulation** (enabled only when there are no errors).
 6. Click a row in the simulation results to highlight that aisle's paths on the canvas.
 7. Use **↑ Import** / **↓ Export** in the top bar to save or load graphs as JSON.
+
+### Reproducible simulation scenarios
+
+1. In the **Properties → Simulator Inputs** panel, set **Random Seed** to a fixed integer (for example `42`).
+2. Keep the graph and simulator inputs unchanged, then run backend fleet sizing.
+3. Re-run with the same seed and scenario. The UI sends the same `random_seed` in each request, enabling deterministic backend comparisons.
 
 ## Architecture
 

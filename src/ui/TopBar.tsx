@@ -19,6 +19,7 @@ const ImportSchema = z.object({
     metersPerPixel: z.number().positive(),
     simulator: z.object({
       storageTypesInUse: z.array(z.enum(['rack', 'ground_storage', 'ground_stacking'])).min(1),
+      randomSeed: z.number().int().optional(),
       inboundDailyPallets: z.number().int().min(0).optional(),
       outboundDailyPallets: z.number().int().min(0).optional(),
       totalDailyPallets: z.number().int().positive().optional(),
@@ -102,6 +103,7 @@ export function TopBar() {
             metersPerPixel: parsed.settings.metersPerPixel,
             simulator: parsed.settings.simulator ? {
               ...parsed.settings.simulator,
+              randomSeed: parsed.settings.simulator.randomSeed ?? 42,
               inboundDailyPallets:
                 parsed.settings.simulator.inboundDailyPallets
                 ?? Math.round((parsed.settings.simulator.totalDailyPallets ?? 1000) / 2),
@@ -112,6 +114,7 @@ export function TopBar() {
               inboundDailyPallets: 500,
               outboundDailyPallets: 500,
               storageTypesInUse: ['rack'],
+              randomSeed: 42,
               operatingHours: 16,
               utilizationTarget: 0.75,
               rackDailyPallets: 500,

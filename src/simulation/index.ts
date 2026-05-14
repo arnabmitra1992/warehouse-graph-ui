@@ -6,6 +6,15 @@ import type { DijkstraEdge } from './dijkstra'
 const SPEED_XQE = 2.0  // m/s
 const SPEED_XNA = 1.5  // m/s
 
+function createRng(seed?: number): () => number {
+  if (!Number.isFinite(seed)) return Math.random
+  let state = Math.trunc(seed) >>> 0
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0
+    return state / 4294967296
+  }
+}
+
 function buildAdj(
   edges: SimGraph['edges'],
   filter?: (e: SimGraph['edges'][0]) => boolean
@@ -48,6 +57,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
 
   const speed = siteMode === 'XNA' ? SPEED_XNA : SPEED_XQE
   const sim = settings?.simulator
+  const rng = createRng(sim?.randomSeed)
   const selectedStorageTypes = new Set(sim?.storageTypesInUse ?? [])
   const useRack = selectedStorageTypes.has('rack')
   const useGroundStorage = selectedStorageTypes.has('ground_storage')
@@ -324,7 +334,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       }
       // Random outbound gate selection per storage candidate (as requested).
       const outDist = distFromOutboundByGate.length > 0
-        ? (distFromOutboundByGate[Math.floor(Math.random() * distFromOutboundByGate.length)].get(n.id) ?? Number.POSITIVE_INFINITY)
+        ? (distFromOutboundByGate[Math.floor(rng() * distFromOutboundByGate.length)].get(n.id) ?? Number.POSITIVE_INFINITY)
         : 0
       const needsHo = sourceDist >= 50 || outDist >= 50
       let hoId: string | undefined
@@ -352,7 +362,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   if (totalTasks > 0 && dispatchCandidates.length > 0) {
     // Randomized storage selection for task assignment as requested.
     for (let i = 0; i < totalTasks; i += 1) {
-      const idx = Math.floor(Math.random() * dispatchCandidates.length)
+      const idx = Math.floor(rng() * dispatchCandidates.length)
       const c = dispatchCandidates[idx]
       const cur = storageTaskMap.get(c.storageNodeId)
       if (cur) {
