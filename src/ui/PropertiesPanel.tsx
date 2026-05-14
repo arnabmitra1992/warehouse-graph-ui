@@ -247,6 +247,22 @@ function SimulatorInputs({
           <option value="on">on</option>
         </select>
       </Field>
+      <Field label="Random Seed">
+        <input
+          className={inputCls()}
+          type="number"
+          step={1}
+          value={sim.randomSeed ?? ''}
+          placeholder="Optional (e.g. 42)"
+          onChange={(e) => {
+            const parsed = Number.parseInt(e.target.value, 10)
+            onUpdate({
+              ...sim,
+              randomSeed: e.target.value === '' || Number.isNaN(parsed) ? undefined : parsed,
+            })
+          }}
+        />
+      </Field>
       <Field label="Intersections Count">
         <input className={inputCls()} type="number" min={0} value={sim.intersectionCount}
           onChange={(e) => onUpdate({ ...sim, intersectionCount: parseInt(e.target.value || '0', 10) || 0 })} />
