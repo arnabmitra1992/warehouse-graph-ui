@@ -8,7 +8,7 @@ const SPEED_XNA = 1.5  // m/s
 
 function createRng(seed?: number): () => number {
   if (!Number.isFinite(seed)) return Math.random
-  let state = (Math.trunc(seed) >>> 0) || 1
+  let state = Math.trunc(seed) >>> 0
   return () => {
     state = (1664525 * state + 1013904223) >>> 0
     return state / 4294967296
