@@ -7,7 +7,7 @@ type GroundStorageNodeType = Node<NodeData, 'ground_storage'>
 export function GroundStorageNode({ data, selected }: NodeProps<GroundStorageNodeType>) {
   return (
     <div className={`relative flex items-center justify-center ${selected ? 'ring-2 ring-blue-500 rounded' : ''}`}>
-      <div className="w-16 h-10 rounded bg-emerald-500 border-2 border-emerald-700 flex flex-col items-center justify-center text-white">
+      <div className="node-drag-handle cursor-move w-16 h-10 rounded bg-emerald-500 border-2 border-emerald-700 flex flex-col items-center justify-center text-white">
         <span className="text-[9px] font-bold">GROUND</span>
         <span className="text-[9px]">{data?.storageType === 'ground_stacking' ? 'STACK' : 'STORE'}</span>
       </div>

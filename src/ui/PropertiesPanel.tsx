@@ -193,6 +193,10 @@ function SimulatorInputs({
         <input className={inputCls()} type="number" min={0.1} max={1} step={0.01} value={sim.utilizationTarget}
           onChange={(e) => onUpdate({ ...sim, utilizationTarget: Math.max(0.1, Math.min(1, parseFloat(e.target.value || '0.75') || 0.75)) })} />
       </Field>
+      <Field label="Random Seed">
+        <input className={inputCls()} type="number" step={1} value={sim.randomSeed ?? 12345}
+          onChange={(e) => onUpdate({ ...sim, randomSeed: parseInt(e.target.value || '0', 10) || 0 })} />
+      </Field>
       {sim.storageTypesInUse.includes('rack') && (
       <Field label="Rack Daily Pallets">
         <input className={inputCls()} type="number" min={0} value={sim.rackDailyPallets}
@@ -209,6 +213,10 @@ function SimulatorInputs({
         <Field label="Rack Levels">
           <input className={inputCls()} type="number" min={1} value={sim.rackLevels}
             onChange={(e) => onUpdate({ ...sim, rackLevels: parseInt(e.target.value || '0', 10) || 1 })} />
+        </Field>
+        <Field label="Rack Height (mm)">
+          <input className={inputCls()} type="number" min={100} value={sim.rackHeightMm}
+            onChange={(e) => onUpdate({ ...sim, rackHeightMm: parseInt(e.target.value || '0', 10) || 3900 })} />
         </Field>
         <Field label="Shelf Spacing (mm)">
           <input className={inputCls()} type="number" min={100} value={sim.shelfHeightSpacingMm}
@@ -243,6 +251,13 @@ function SimulatorInputs({
       <Field label="Traffic Control">
         <select className={inputCls()} value={sim.trafficControlEnabled ? 'on' : 'off'}
           onChange={(e) => onUpdate({ ...sim, trafficControlEnabled: e.target.value === 'on' })}>
+          <option value="off">off</option>
+          <option value="on">on</option>
+        </select>
+      </Field>
+      <Field label="Force Explicit Handover">
+        <select className={inputCls()} value={sim.forceExplicitHandover ? 'on' : 'off'}
+          onChange={(e) => onUpdate({ ...sim, forceExplicitHandover: e.target.value === 'on' })}>
           <option value="off">off</option>
           <option value="on">on</option>
         </select>

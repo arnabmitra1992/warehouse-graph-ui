@@ -45,6 +45,16 @@ interface AppState {
   importGraph: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[], settings: AppSettings, underlay?: LayoutUnderlay | null) => void
 }
 
+function normalizeNode(node: Node<NodeData>): Node<NodeData> {
+  return {
+    ...node,
+    draggable: true,
+    selectable: true,
+    connectable: true,
+    dragHandle: '.node-drag-handle',
+  }
+}
+
 function runValidation(nodes: Node<NodeData>[], edges: Edge<EdgeData>[], settings: AppSettings): ValidationIssue[] {
   return validateGraph(nodes, edges, settings)
 }
@@ -62,10 +72,12 @@ export const useStore = create<AppState>((set, get) => ({
       operatingHours: 16,
       utilizationTarget: 0.75,
       rackDailyPallets: 500,
+      rackHeightMm: 3900,
       stackingDailyPallets: 200,
       rackLevels: 3,
       shelfHeightSpacingMm: 1300,
       positionSpacingMm: 950,
+      forceExplicitHandover: false,
       stackingRows: 10,
       stackingColumns: 12,
       stackingLevels: 3,
@@ -84,7 +96,7 @@ export const useStore = create<AppState>((set, get) => ({
   highlightedEdgeIds: new Set(),
 
   onNodesChange: (changes) => {
-    const nodes = applyNodeChanges(changes, get().nodes) as Node<NodeData>[]
+    const nodes = (applyNodeChanges(changes, get().nodes) as Node<NodeData>[]).map(normalizeNode)
     set({ nodes, issues: runValidation(nodes, get().edges, get().settings) })
   },
 
@@ -109,7 +121,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addNode: (node) => {
-    const nodes = [...get().nodes, node]
+    const nodes = [...get().nodes, normalizeNode(node)]
     set({ nodes, issues: runValidation(nodes, get().edges, get().settings) })
   },
   removeNode: (id) => {
@@ -124,7 +136,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   updateNodeData: (id, data) => {
-    const nodes = get().nodes.map(n => n.id === id ? { ...n, data: { ...n.data, ...data } } : n)
+    const nodes = get().nodes.map(n => n.id === id ? normalizeNode({ ...n, data: { ...n.data, ...data } }) : n)
     set({ nodes, issues: runValidation(nodes, get().edges, get().settings) })
   },
 
@@ -164,12 +176,13 @@ export const useStore = create<AppState>((set, get) => ({
   setUnderlay: (underlay) => set({ underlay }),
 
   importGraph: (nodes, edges, settings, underlay = null) => {
+    const normalizedNodes = nodes.map(normalizeNode)
     set({
-      nodes,
+      nodes: normalizedNodes,
       edges,
       settings,
       underlay,
-      issues: runValidation(nodes, edges, settings),
+      issues: runValidation(normalizedNodes, edges, settings),
       simResult: null,
     })
   },

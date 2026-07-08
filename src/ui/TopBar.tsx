@@ -26,10 +26,12 @@ const ImportSchema = z.object({
       operatingHours: z.number().positive(),
       utilizationTarget: z.number().positive(),
       rackDailyPallets: z.number().int().min(0),
+      rackHeightMm: z.number().positive().optional(),
       stackingDailyPallets: z.number().int().min(0),
       rackLevels: z.number().int().positive(),
       shelfHeightSpacingMm: z.number().positive(),
       positionSpacingMm: z.number().positive(),
+      forceExplicitHandover: z.boolean().optional(),
       stackingRows: z.number().int().positive(),
       stackingColumns: z.number().int().positive(),
       stackingLevels: z.number().int().positive(),
@@ -110,18 +112,25 @@ export function TopBar() {
               outboundDailyPallets:
                 parsed.settings.simulator.outboundDailyPallets
                 ?? Math.round((parsed.settings.simulator.totalDailyPallets ?? 1000) / 2),
+              rackHeightMm:
+                parsed.settings.simulator.rackHeightMm
+                ?? ((parsed.settings.simulator.rackLevels ?? 3) * (parsed.settings.simulator.shelfHeightSpacingMm ?? 1300)),
+              forceExplicitHandover: parsed.settings.simulator.forceExplicitHandover ?? false,
             } : {
               inboundDailyPallets: 500,
               outboundDailyPallets: 500,
+              randomSeed: 42,
               storageTypesInUse: ['rack'],
               randomSeed: 42,
               operatingHours: 16,
               utilizationTarget: 0.75,
               rackDailyPallets: 500,
+              rackHeightMm: 3900,
               stackingDailyPallets: 200,
               rackLevels: 3,
               shelfHeightSpacingMm: 1300,
               positionSpacingMm: 950,
+              forceExplicitHandover: false,
               stackingRows: 10,
               stackingColumns: 12,
               stackingLevels: 3,

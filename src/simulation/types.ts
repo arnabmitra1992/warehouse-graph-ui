@@ -41,12 +41,31 @@ export interface AisleResult {
 
 export interface SimResult {
   aisles: AisleResult[]
+  workloadBuckets?: {
+    horizontal_xpl: number
+    horizontal_xqe: number
+    stacking_xqe: number
+    horizontal_xpl_inbound: number
+    horizontal_xpl_outbound: number
+    horizontal_xqe_inbound: number
+    horizontal_xqe_outbound: number
+    stacking_xqe_inbound: number
+    stacking_xqe_outbound: number
+  }
   storageTaskBreakdown?: Array<{
     storageNodeId: string
     tasksPerDay: number
+    inboundTasksPerDay: number
+    outboundTasksPerDay: number
     aisleId?: number
     handoverNodeId?: string
-    branch: 'XQE' | 'XPL' | 'unknown'
+    inboundHandoverNodeId?: string
+    outboundHandoverNodeId?: string
+    storageMode?: 'rack' | 'ground_storage' | 'ground_stacking'
+    inboundBranch: string
+    outboundBranch: string
+    inboundStorageSideBranch?: string
+    outboundStorageSideBranch?: string
   }>
   diagnostics?: {
     excludedStorages: Array<{

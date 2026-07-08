@@ -23,6 +23,14 @@ npm run dev
 
 Open [http://localhost:5173/warehouse-graph-ui/](http://localhost:5173/warehouse-graph-ui/)
 
+For local UI + local simulator API:
+
+```bash
+cp .env.example .env
+```
+
+The default `.env.example` points the UI at `http://127.0.0.1:8000`.
+
 ## Scripts
 
 | Command | Description |
@@ -31,6 +39,13 @@ Open [http://localhost:5173/warehouse-graph-ui/](http://localhost:5173/warehouse
 | `npm run build` | TypeScript check + production build |
 | `npm run preview` | Preview the production build locally |
 | `npm run deploy` | Build and publish to GitHub Pages |
+
+## Environment Variables
+
+| Variable | Purpose | Example |
+|---------|---------|---------|
+| `VITE_SIMULATOR_API_BASE_URL` | Base URL for the simulator backend API | `https://sim.example.com` |
+| `VITE_APP_BASE_PATH` | Public base path for the built app | `/` or `/warehouse-graph-ui/` |
 
 ## Usage
 
@@ -66,3 +81,17 @@ npm run deploy
 ```
 
 Make sure the repo's **Pages** source is set to the `gh-pages` branch in GitHub → Settings → Pages.
+
+For GitHub Pages specifically, set:
+
+```bash
+VITE_APP_BASE_PATH=/warehouse-graph-ui/
+```
+
+## Deploy with a Remote Backend
+
+For a shared team setup:
+
+1. Deploy the backend API from the `age-warehouse-simulator` repo to your Cologne server.
+2. Set `VITE_SIMULATOR_API_BASE_URL=https://sim.your-domain.com`.
+3. Build and deploy this frontend to Vercel or another static host.

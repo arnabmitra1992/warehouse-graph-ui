@@ -1,5 +1,5 @@
 export interface NodeData {
-  kind: 'source_gate' | 'handover' | 'rack_aisle' | 'turn' | 'outbound_gate' | 'ground_storage'
+  kind: 'source_gate' | 'handover' | 'rack_aisle' | 'turn' | 'outbound_gate' | 'ground_storage' | 'rest_point'
   label?: string
   aisleId?: number
   storageType?: 'rack' | 'ground_storage' | 'ground_stacking'
@@ -37,10 +37,12 @@ export interface SimulatorInputs {
   // Backward-compatible optional legacy fields (not primary inputs anymore)
   totalDailyPallets?: number
   rackDailyPallets: number
+  rackHeightMm: number
   stackingDailyPallets: number
   rackLevels: number
   shelfHeightSpacingMm: number
   positionSpacingMm: number
+  forceExplicitHandover: boolean
   stackingRows: number
   stackingColumns: number
   stackingLevels: number

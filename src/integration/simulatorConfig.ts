@@ -42,7 +42,8 @@ function detectRackMode(graph: SimGraph): 'XNA' | 'XQE' {
 }
 
 function deriveGeometry(graph: SimGraph) {
-  const sourceGate = graph.nodes.find((n) => n.kind === 'source_gate')
+  const sourceGates = graph.nodes.filter((n) => n.kind === 'source_gate')
+  const restPoint = graph.nodes.find((n) => n.kind === 'rest_point')
   const aisleIds = Array.from(
     new Set([
       ...graph.nodes
@@ -65,16 +66,27 @@ function deriveGeometry(graph: SimGraph) {
   }
 
   const nonRackAdj = buildAdj(graph.edges, (e) => e.preset !== 'rack_aisle' && e.preset !== 'storage_aisle')
-  const distFromSource = sourceGate ? dijkstra(nonRackAdj, sourceGate.id).dist : new Map<string, number>()
+  const distFromSourceMaps = sourceGates.map((sg) => dijkstra(nonRackAdj, sg.id).dist)
+  const allAdj = buildAdj(graph.edges)
+  const distFromRest = restPoint ? dijkstra(allAdj, restPoint.id).dist : new Map<string, number>()
+  const headAisleAnchorNodes = graph.nodes.filter((n) => n.kind === 'turn' || n.kind === 'handover')
+  const minDistance = (maps: Map<string, number>[], nodeId: string): number | null => {
+    let best = Number.POSITIVE_INFINITY
+    for (const dist of maps) {
+      const d = dist.get(nodeId)
+      if (d != null && d < best) best = d
+    }
+    return Number.isFinite(best) ? best : null
+  }
 
   const sourceToHandover: number[] = []
   for (const h of handoverNodes) {
-    const d = distFromSource.get(h.id)
+    const d = minDistance(distFromSourceMaps, h.id)
     if (d != null) sourceToHandover.push(d)
   }
   const sourceToOutbound: number[] = []
   for (const o of outboundNodes) {
-    const d = distFromSource.get(o.id)
+    const d = minDistance(distFromSourceMaps, o.id)
     if (d != null) sourceToOutbound.push(d)
   }
 
@@ -94,6 +106,15 @@ function deriveGeometry(graph: SimGraph) {
     rackLengthByAisle.set(e.aisleId, (rackLengthByAisle.get(e.aisleId) ?? 0) + e.length)
   }
   const rackLengths = [...rackLengthByAisle.values()]
+
+  const restToInboundCandidates = sourceGates
+    .map((sg) => distFromRest.get(sg.id))
+    .filter((d): d is number => d != null && Number.isFinite(d))
+  const restToInboundM = median(restToInboundCandidates)
+  const restToHeadAisleCandidates = headAisleAnchorNodes
+    .map((n) => distFromRest.get(n.id))
+    .filter((d): d is number => d != null && Number.isFinite(d))
+  const restToHeadAisleM = median(restToHeadAisleCandidates)
 
   const nonRackWidths = graph.edges
     .filter((e) => e.preset !== 'rack_aisle' && e.preset !== 'storage_aisle')
@@ -120,6 +141,8 @@ function deriveGeometry(graph: SimGraph) {
 
   return {
     aisleCount: Math.max(1, aisleIds.length),
+    restToInboundM,
+    restToHeadAisleM,
     sourceToHandoverM: median(sourceToHandover),
     sourceToOutboundM: median(sourceToOutbound),
     handoverToRackM: median(handoverToRack),
@@ -141,6 +164,11 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
   const headAisleToRackAisleMm = toMm(geometry.handoverToRackM ?? 6, 6000)
   const rackAisleLengthMm = toMm(geometry.rackLengthM ?? 20, 20000)
   const headAisleWidthMm = toMm(geometry.nonRackWidthM ?? 3.5, 3500)
+  const restToInboundMm = toMm(geometry.restToInboundM ?? 5, 5000)
+  const restToHeadAisleMm = toMm(
+    geometry.restToHeadAisleM ?? (geometry.restToInboundM != null ? Math.max(1, geometry.restToInboundM * 0.6) : 3),
+    3000
+  )
   const rackAisleWidthMm = toMm(
     geometry.rackWidthM ?? (rackMode === 'XNA' ? 1.77 : 2.84),
     rackMode === 'XNA' ? 1770 : 2840
@@ -187,7 +215,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         forward_speed_ms: 1.0,
         reverse_speed_ms: 0.3,
         lift_speed_ms: 0.2,
-        max_lift_height_mm: 4500,
+        max_lift_height_mm: Math.max(4500, simInput?.rackHeightMm ?? 4500),
         pickup_time_s: 30,
         dropoff_time_s: 30,
       },
@@ -201,7 +229,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         forward_speed_ms: 1.0,
         reverse_speed_ms: 1.0,
         lift_speed_ms: 0.2,
-        max_lift_height_mm: 8500,
+        max_lift_height_mm: Math.max(8500, simInput?.rackHeightMm ?? 8500),
         pickup_time_s: 30,
         dropoff_time_s: 30,
       },
@@ -209,14 +237,16 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
     },
     Warehouse_Layout: {
       Distances_mm: {
-        Rest_to_Inbound: 5000,
-        Rest_to_Head_Aisle: 3000,
+        Rest_to_Inbound: restToInboundMm,
+        Rest_to_Head_Aisle: restToHeadAisleMm,
         Head_Aisle_to_Handover: headAisleToHandoverMm,
         Head_Aisle_to_Rack_Aisle: headAisleToRackAisleMm,
         Rack_Aisle_Length: rackAisleLengthMm,
         Head_Aisle_to_Stacking: 10000,
         Head_Aisle_to_Outbound: headAisleToOutboundMm,
         Inbound_Depth_mm: 2000,
+        Rest_to_Production: restToInboundMm,
+        Production_to_Storage_Entry: headAisleToRackAisleMm,
       },
       Aisle_Widths_mm: {
         Inbound_Access_Width_mm: headAisleWidthMm,
@@ -227,6 +257,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
     },
     Rack_Configuration: {
       Rack_Length_mm: rackAisleLengthMm,
+      Rack_Height_mm: simInput?.rackHeightMm ?? ((simInput?.rackLevels ?? 3) * (simInput?.shelfHeightSpacingMm ?? 1300)),
       Pallet_Width_mm: 800,
       Shelf_Height_Spacing_mm: simInput?.shelfHeightSpacingMm ?? 1300,
       Position_Spacing_mm: simInput?.positionSpacingMm ?? 950,
@@ -278,6 +309,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         rack_mode: rackMode,
         rack_vehicle_type: rackVehicleType,
         storage_types_in_use: storageTypesInUse,
+        force_explicit_handover: simInput?.forceExplicitHandover ?? false,
         throughput_daily: {
           total: totalDailyPallets,
           inbound: inboundDailyPallets,

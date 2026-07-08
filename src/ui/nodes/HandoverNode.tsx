@@ -7,7 +7,7 @@ type HandoverNodeType = Node<NodeData, 'handover'>
 export function HandoverNode({ data, selected }: NodeProps<HandoverNodeType>) {
   return (
     <div className={`relative flex items-center justify-center ${selected ? 'ring-2 ring-blue-500 rounded-full' : ''}`}>
-      <div className="w-14 h-14 rounded-full bg-blue-500 border-2 border-blue-700 flex flex-col items-center justify-center text-white">
+      <div className="node-drag-handle cursor-move w-14 h-14 rounded-full bg-blue-500 border-2 border-blue-700 flex flex-col items-center justify-center text-white">
         <span className="text-[10px] font-bold">HO</span>
         {data?.aisleId != null && <span className="text-[9px]">#{data.aisleId}</span>}
       </div>

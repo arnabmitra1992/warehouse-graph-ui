@@ -19,6 +19,7 @@ import { RackAisleNode } from './nodes/RackAisleNode'
 import { TurnNode } from './nodes/TurnNode'
 import { OutboundGateNode } from './nodes/OutboundGateNode'
 import { GroundStorageNode } from './nodes/GroundStorageNode'
+import { RestPointNode } from './nodes/RestPointNode'
 
 const nodeTypes: NodeTypes = {
   source_gate: SourceGateNode,
@@ -27,6 +28,7 @@ const nodeTypes: NodeTypes = {
   turn: TurnNode,
   outbound_gate: OutboundGateNode,
   ground_storage: GroundStorageNode,
+  rest_point: RestPointNode,
 }
 
 function FlowCanvasInner() {
@@ -69,7 +71,14 @@ function FlowCanvasInner() {
         position,
         data: {
           kind,
-          label: kind === 'source_gate' ? 'SG' : kind === 'outbound_gate' ? 'OG' : undefined,
+          label:
+            kind === 'source_gate'
+              ? 'SG'
+              : kind === 'outbound_gate'
+              ? 'OG'
+              : kind === 'rest_point'
+              ? 'REST'
+              : undefined,
           storageType: kind === 'rack_aisle' ? 'rack' : kind === 'ground_storage' ? 'ground_storage' : undefined,
         },
       }
@@ -142,6 +151,9 @@ function FlowCanvasInner() {
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         nodeTypes={nodeTypes}
+        nodesDraggable
+        elementsSelectable
+        nodesConnectable
         selectionMode={SelectionMode.Partial}
         fitView
         className="relative z-10"

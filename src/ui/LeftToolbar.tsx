@@ -1,6 +1,7 @@
 import React from 'react'
 
 const nodeTypes = [
+  { kind: 'rest_point', label: 'Rest Point', color: 'bg-amber-500' },
   { kind: 'source_gate', label: 'Source Gate', color: 'bg-green-500' },
   { kind: 'outbound_gate', label: 'Outbound Gate', color: 'bg-red-500' },
   { kind: 'handover', label: 'Handover', color: 'bg-blue-500' },

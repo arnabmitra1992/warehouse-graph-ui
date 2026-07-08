@@ -33,18 +33,28 @@ function buildAdj(
 export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResult {
   const aisles: AisleResult[] = []
   const excludedStorages: Array<{ storageNodeId: string; reason: string }> = []
-  const dispatchCandidates: Array<{
+  const inboundCandidates: Array<{
     storageNodeId: string
     aisleId?: number
-    branch: 'XQE' | 'XPL' | 'unknown'
+    branch: 'XQE' | 'XPL' | 'XNA' | 'unknown'
     handoverNodeId?: string
+    storageSideBranch?: 'XQE' | 'XPL' | 'XNA'
+    cost: number
+  }> = []
+  const outboundCandidates: Array<{
+    storageNodeId: string
+    aisleId?: number
+    branch: 'XQE' | 'XPL' | 'XNA' | 'unknown'
+    handoverNodeId?: string
+    storageSideBranch?: 'XQE' | 'XPL' | 'XNA'
     cost: number
   }> = []
 
-  const sourceGate = graph.nodes.find(n => n.kind === 'source_gate')
-  if (!sourceGate) {
+  const sourceGates = graph.nodes.filter((n) => n.kind === 'source_gate')
+  if (sourceGates.length === 0) {
     return { aisles: [] }
   }
+  const restPoint = graph.nodes.find((n) => n.kind === 'rest_point') ?? sourceGates[0]
   const outboundGates = graph.nodes.filter((n) => n.kind === 'outbound_gate')
 
   // Determine site rack mode
@@ -62,11 +72,14 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   const useRack = selectedStorageTypes.has('rack')
   const useGroundStorage = selectedStorageTypes.has('ground_storage')
   const useGroundStacking = selectedStorageTypes.has('ground_stacking')
+  const forceExplicitHandover = !!sim?.forceExplicitHandover
   const isGroundNodeActive = (n: SimGraph['nodes'][number]) => {
     if (n.kind !== 'ground_storage') return false
     if (!useGroundStorage && !useGroundStacking) return false
-    if (!n.storageType) return true
-    return selectedStorageTypes.has(n.storageType)
+    // Ground nodes share the same physical storage network. Keep them active in
+    // dispatch even if individual node labels differ (store vs stack), so tasks
+    // can distribute across all eligible ground locations.
+    return true
   }
   const isRackNodeActive = (n: SimGraph['nodes'][number]) => n.kind === 'rack_aisle' && useRack
 
@@ -84,13 +97,42 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     if (isRackNodeActive(n) || isGroundNodeActive(n)) aisleIdsSet.add(n.aisleId)
   }
   const aisleIds = Array.from(aisleIdsSet)
+  const nodeAisleId = new Map<string, number>()
+  for (const n of graph.nodes) {
+    if (n.aisleId != null) nodeAisleId.set(n.id, n.aisleId)
+  }
+  for (const e of graph.edges) {
+    if ((e.preset === 'rack_aisle' || e.preset === 'storage_aisle') && e.aisleId != null) {
+      if (!nodeAisleId.has(e.source)) nodeAisleId.set(e.source, e.aisleId)
+      if (!nodeAisleId.has(e.target)) nodeAisleId.set(e.target, e.aisleId)
+    }
+  }
 
   // Non-rack adjacency for distance computation
   const nonRackAdj = buildAdj(graph.edges, e => e.preset !== 'rack_aisle' && e.preset !== 'storage_aisle')
-  const {dist: distFromSG} = dijkstra(nonRackAdj, sourceGate.id)
   const allAdj = buildAdj(graph.edges)
-  const {dist: allDistFromSG} = dijkstra(allAdj, sourceGate.id)
+  const nonRackDistBySource = sourceGates.map((sg) => ({
+    sourceId: sg.id,
+    dist: dijkstra(nonRackAdj, sg.id).dist,
+  }))
+  const allDistBySource = sourceGates.map((sg) => ({
+    sourceId: sg.id,
+    dist: dijkstra(allAdj, sg.id).dist,
+  }))
+  const {dist: allDistFromRest} = dijkstra(allAdj, restPoint.id)
   const distFromOutboundByGate = outboundGates.map((og) => dijkstra(allAdj, og.id).dist)
+  const nearestSourceForNode = (nodeId: string, useAllEdges: boolean): { sourceId: string; distance: number } | null => {
+    const maps = useAllEdges ? allDistBySource : nonRackDistBySource
+    let best: { sourceId: string; distance: number } | null = null
+    for (const entry of maps) {
+      const d = entry.dist.get(nodeId)
+      if (d == null) continue
+      if (!best || d < best.distance) {
+        best = { sourceId: entry.sourceId, distance: d }
+      }
+    }
+    return best
+  }
 
   const allHandoverNodes = graph.nodes.filter((n) => n.kind === 'handover')
   const distFromHandoverAll = new Map<string, Map<string, number>>()
@@ -100,8 +142,44 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   const useGround = useGroundStorage || useGroundStacking
   const inboundDaily = Math.max(0, Number.isFinite(sim?.inboundDailyPallets) ? (sim?.inboundDailyPallets as number) : 0)
   const outboundDaily = Math.max(0, Number.isFinite(sim?.outboundDailyPallets) ? (sim?.outboundDailyPallets as number) : 0)
-  const totalFlowTasks = inboundDaily + outboundDaily
-  const totalTasks = useGround ? totalFlowTasks : (sim?.rackDailyPallets ?? 0)
+  const inferGroundNodeMode = (n: SimGraph['nodes'][number]): 'ground_storage' | 'ground_stacking' => {
+    // Global simulator mode should override legacy per-node defaults when the run
+    // is single-mode ground storage or single-mode ground stacking.
+    if (useGroundStacking && !useGroundStorage) return 'ground_stacking'
+    if (useGroundStorage && !useGroundStacking) return 'ground_storage'
+    if (n.storageType === 'ground_stacking') return 'ground_stacking'
+    if (n.storageType === 'ground_storage') return 'ground_storage'
+    return 'ground_storage'
+  }
+
+  const buildStorageLegAdj = (aisleId: number) => buildAdj(graph.edges, e => {
+    if (siteMode === 'XNA') {
+      if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') {
+        return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
+      }
+      return e.widthM >= 4.0
+    }
+    if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') {
+      return e.aisleId === aisleId && e.widthM >= 2.84
+    }
+    return e.widthM >= 2.84
+  })
+
+  const getPreferredHandoversForAisle = (
+    aisleId: number,
+    storageNodes: SimGraph['nodes']
+  ): SimGraph['nodes'] => {
+    const aisleTagged = allHandoverNodes.filter((h) => h.aisleId === aisleId)
+    if (aisleTagged.length > 0) return aisleTagged
+    const shared = allHandoverNodes.filter((h) => h.aisleId == null)
+    const candidatePool = shared.length > 0 ? shared : allHandoverNodes
+    if (!forceExplicitHandover || storageNodes.length === 0) return candidatePool
+    const storageLegAdj = buildStorageLegAdj(aisleId)
+    return candidatePool.filter((ho) => {
+      const { dist } = dijkstra(storageLegAdj, ho.id)
+      return storageNodes.some((n) => dist.has(n.id))
+    })
+  }
 
   for (const aisleId of aisleIds) {
     const storageEdgeNodeIds = new Set(
@@ -120,7 +198,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     }
     const rackNode = rackNodes[0]
     const sourceToStorageDistances = rackNodes
-      .map((n) => allDistFromSG.get(n.id))
+      .map((n) => nearestSourceForNode(n.id, true)?.distance)
       .filter((d): d is number => d != null)
     const storageToOutboundDistances = rackNodes
       .map((n) => {
@@ -137,23 +215,36 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     const storageToOutbound = storageToOutboundDistances.length > 0
       ? storageToOutboundDistances.reduce((s, d) => s + d, 0) / storageToOutboundDistances.length
       : 0
-    // Handover is needed when horizontal transport on inbound or outbound side is long.
-    const needsHandover = (sourceToStorage ?? 0) >= 50 || (storageToOutbound ?? 0) >= 50
+    const inferredMode = rackNode.kind === 'ground_storage' ? inferGroundNodeMode(rackNode) : 'rack'
+    const directBranch: 'XQE' | 'XPL' | 'XNA' =
+      inferredMode === 'ground_storage' ? 'XPL' : (rackNode.kind === 'rack_aisle' && siteMode === 'XNA' ? 'XNA' : 'XQE')
+    const preferredHandovers = getPreferredHandoversForAisle(aisleId, rackNodes)
+    const explicitHandoverRequested =
+      forceExplicitHandover &&
+      inferredMode !== 'ground_storage' &&
+      preferredHandovers.length > 0
+    const needsHandover =
+      inferredMode === 'ground_storage'
+        ? false
+        : explicitHandoverRequested || (sourceToStorage >= 50 || storageToOutbound >= 50)
     let chosenHandoverNode = undefined as (typeof allHandoverNodes[number] | undefined)
+    let chosenSourceGateId = sourceGates[0].id
     let chosenHoSourceDist = Number.POSITIVE_INFINITY
     if (needsHandover && allHandoverNodes.length > 0) {
-      const aisleTagged = allHandoverNodes.filter((h) => h.aisleId === aisleId)
-      const shared = allHandoverNodes.filter((h) => h.aisleId == null)
-      const preferred = aisleTagged.length > 0 ? aisleTagged : shared
-      const candidates = preferred.length > 0 ? preferred : allHandoverNodes
+      const candidates = preferredHandovers.length > 0 ? preferredHandovers : allHandoverNodes
       for (const ho of candidates) {
-        const hoDist = distFromSG.get(ho.id)
-        if (hoDist == null) continue
-        if (hoDist < chosenHoSourceDist) {
-          chosenHoSourceDist = hoDist
+        const nearest = nearestSourceForNode(ho.id, false)
+        if (!nearest) continue
+        if (nearest.distance < chosenHoSourceDist) {
+          chosenHoSourceDist = nearest.distance
           chosenHandoverNode = ho
+          chosenSourceGateId = nearest.sourceId
         }
       }
+    }
+    if (!needsHandover) {
+      const nearestStorageSource = nearestSourceForNode(rackNode.id, true)
+      if (nearestStorageSource) chosenSourceGateId = nearestStorageSource.sourceId
     }
     if (needsHandover && !chosenHandoverNode) {
       aisles.push({aisleId, distanceToHandover: 0, branch: 'XPL', error: 'Missing handover for >=50m source->storage path'})
@@ -170,7 +261,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
         if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') return e.aisleId === aisleId && e.widthM >= 2.84
         return e.widthM >= 2.84
       })
-      const {dist: rDist, prev: rPrev} = dijkstra(rackAdj, sourceGate.id)
+      const {dist: rDist, prev: rPrev} = dijkstra(rackAdj, chosenSourceGateId)
       if (rDist.has(rackNode.id)) {
         const p = reconstructPath(rPrev, rackNode.id)
         if (p) {
@@ -184,26 +275,17 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       aisles.push({
         aisleId,
         distanceToHandover: 0,
-        branch: 'XQE',
+        branch: directBranch,
         handoverNodeId: undefined,
         storageNodeIds: rackNodes.map((n) => n.id),
         handoverPath: undefined,
         rackPath,
       })
-      for (const n of rackNodes) {
-        const d = allDistFromSG.get(n.id) ?? 50
-        dispatchCandidates.push({
-          storageNodeId: n.id,
-          aisleId,
-          branch: 'XQE',
-          handoverNodeId: undefined,
-          cost: Math.max(1, d),
-        })
-      }
       continue
     }
     const handoverNode = chosenHandoverNode!
-    const distanceToHandover = distFromSG.get(handoverNode.id)
+    const {dist: chosenSourceToNonRackDist} = dijkstra(nonRackAdj, chosenSourceGateId)
+    const distanceToHandover = chosenSourceToNonRackDist.get(handoverNode.id)
     if (distanceToHandover == null) {
       aisles.push({aisleId, distanceToHandover: 0, branch: 'unknown', error: 'Handover unreachable from source_gate'})
       continue
@@ -211,12 +293,12 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
 
     // Business rule: if handover is required (source->storage >= 50m),
     // horizontal transport must be XPL for SG->HO leg.
-    const branch: 'XQE' | 'XPL' = 'XPL'
+    const branch: 'XPL' = 'XPL'
     const minWidth = 2.60
 
     // Handover path
     const handoverAdj = buildAdj(graph.edges, e => e.preset !== 'rack_aisle' && e.preset !== 'storage_aisle' && e.widthM >= minWidth)
-    const {dist: hoDist, prev: hoPrev} = dijkstra(handoverAdj, sourceGate.id)
+    const {dist: hoDist, prev: hoPrev} = dijkstra(handoverAdj, chosenSourceGateId)
 
     let handoverPath: PathResult | undefined
     if (hoDist.has(handoverNode.id)) {
@@ -276,107 +358,272 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       handoverPath,
       rackPath,
     })
-    for (const n of rackNodes) {
-      const preferred = allHandoverNodes.filter((h) => h.aisleId === aisleId)
-      const shared = allHandoverNodes.filter((h) => h.aisleId == null)
-      const candidates = preferred.length > 0 ? preferred : (shared.length > 0 ? shared : allHandoverNodes)
-      let chosenHo: string | undefined
-      let best = Number.POSITIVE_INFINITY
-      for (const ho of candidates) {
-        const d = distFromHandoverAll.get(ho.id)?.get(n.id)
-        if (d != null && d < best) {
-          best = d
-          chosenHo = ho.id
-        }
-      }
-      dispatchCandidates.push({
-        storageNodeId: n.id,
-        aisleId,
-        branch: 'XPL',
-        handoverNodeId: chosenHo,
-        cost: Math.max(1, best),
-      })
-    }
   }
 
-  if (totalTasks > 0 && aisles.length > 0) {
+  if (inboundDaily + outboundDaily > 0 && aisles.length > 0) {
     const weights = aisles.map((a) => {
       const dist = (a.rackPath?.distanceM ?? 0) + (a.handoverPath?.distanceM ?? 0)
       return dist > 0 ? 1 / dist : 1
     })
     const sumW = weights.reduce((s, w) => s + w, 0) || 1
-    let remaining = totalTasks
+    let remaining = inboundDaily + outboundDaily
     aisles.forEach((a, i) => {
-      const assigned = i === aisles.length - 1 ? Math.max(0, remaining) : Math.max(0, Math.floor((weights[i] / sumW) * totalTasks))
+      const assigned = i === aisles.length - 1 ? Math.max(0, remaining) : Math.max(0, Math.floor((weights[i] / sumW) * (inboundDaily + outboundDaily)))
       a.assignedTasks = assigned
       remaining -= assigned
     })
   }
 
-  const storageTaskMap = new Map<string, { tasksPerDay: number; aisleId?: number; handoverNodeId?: string; branch: 'XQE' | 'XPL' | 'unknown' }>()
+  const storageTaskMap = new Map<string, {
+    tasksPerDay: number
+    inboundTasksPerDay: number
+    outboundTasksPerDay: number
+    aisleId?: number
+    handoverNodeId?: string
+    inboundHandoverNodeId?: string
+    outboundHandoverNodeId?: string
+    storageMode: 'rack' | 'ground_storage' | 'ground_stacking'
+    inboundHandover: boolean
+    outboundHandover: boolean
+    inboundBranch: string
+    outboundBranch: string
+    inboundStorageSideBranch?: 'XQE' | 'XPL' | 'XNA'
+    outboundStorageSideBranch?: 'XQE' | 'XPL' | 'XNA'
+  }>()
+  const inboundRouteLoad = new Map<number, number>()
+  const outboundRouteLoad = new Map<number, number>()
   const activeStorageNodes = graph.nodes.filter((n) => isGroundNodeActive(n) || isRackNodeActive(n))
-  const hasStorageEdge = (nodeId: string) =>
-    graph.edges.some((e) => (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') && (e.source === nodeId || e.target === nodeId))
-  if (dispatchCandidates.length <= 1 && activeStorageNodes.length > dispatchCandidates.length) {
-    const existing = new Set(dispatchCandidates.map((d) => d.storageNodeId))
+  {
+    const existingInbound = new Set(inboundCandidates.map((d) => d.storageNodeId))
+    const existingOutbound = new Set(outboundCandidates.map((d) => d.storageNodeId))
     const handoverAdj = buildAdj(graph.edges, e => e.preset !== 'rack_aisle' && e.preset !== 'storage_aisle' && e.widthM >= 2.60)
-    const { dist: hoReachDist } = dijkstra(handoverAdj, sourceGate.id)
+    const nonRackDistBySourceForHo = sourceGates.map((sg) => ({
+      sourceId: sg.id,
+      dist: dijkstra(handoverAdj, sg.id).dist,
+    }))
     for (const n of activeStorageNodes) {
-      if (existing.has(n.id)) continue
-      if (!hasStorageEdge(n.id)) {
-        excludedStorages.push({ storageNodeId: n.id, reason: 'No storage_aisle/rack_aisle edge connected' })
-        continue
-      }
-      const sourceDist = allDistFromSG.get(n.id) ?? Number.POSITIVE_INFINITY
+      const nearestSourceToStorage = nearestSourceForNode(n.id, true)
+      const sourceDist = nearestSourceToStorage?.distance ?? Number.POSITIVE_INFINITY
       if (!Number.isFinite(sourceDist)) {
         excludedStorages.push({ storageNodeId: n.id, reason: 'Unreachable from source gate' })
         continue
       }
-      // Random outbound gate selection per storage candidate (as requested).
-      const outDist = distFromOutboundByGate.length > 0
-        ? (distFromOutboundByGate[Math.floor(rng() * distFromOutboundByGate.length)].get(n.id) ?? Number.POSITIVE_INFINITY)
+      const chosenInboundSourceId = nearestSourceToStorage?.sourceId ?? sourceGates[0].id
+      const inferredMode = n.kind === 'ground_storage' ? inferGroundNodeMode(n) : 'rack'
+      const directBranch: 'XQE' | 'XPL' | 'XNA' =
+        inferredMode === 'ground_storage' ? 'XPL' : (n.kind === 'rack_aisle' && siteMode === 'XNA' ? 'XNA' : 'XQE')
+      const bestOutbound = distFromOutboundByGate.length > 0
+        ? distFromOutboundByGate.reduce((min, map) => Math.min(min, map.get(n.id) ?? Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY)
         : 0
-      const needsHo = sourceDist >= 50 || outDist >= 50
+      const storageAisleId = nodeAisleId.get(n.id)
+      const preferredHandovers = storageAisleId != null ? getPreferredHandoversForAisle(storageAisleId, [n]) : []
+      const explicitHandoverRequested =
+        forceExplicitHandover &&
+        inferredMode !== 'ground_storage' &&
+        preferredHandovers.length > 0
+      const inboundNeedsHo =
+        inferredMode === 'ground_storage'
+          ? false
+          : explicitHandoverRequested || sourceDist >= 50
+      const outboundNeedsHo =
+        inferredMode === 'ground_storage'
+          ? false
+          : explicitHandoverRequested || (Number.isFinite(bestOutbound) ? bestOutbound : 0) >= 50
       let hoId: string | undefined
-      if (needsHo) {
+      if (inboundNeedsHo || outboundNeedsHo) {
         let best = Number.POSITIVE_INFINITY
-        for (const ho of allHandoverNodes) {
+        const hoCandidates = preferredHandovers.length > 0 ? preferredHandovers : allHandoverNodes
+        for (const ho of hoCandidates) {
           const dToStorage = distFromHandoverAll.get(ho.id)?.get(n.id)
-          const dFromSource = hoReachDist.get(ho.id)
+          const dFromSource = nonRackDistBySourceForHo
+            .map((entry) => entry.dist.get(ho.id))
+            .filter((d): d is number => d != null)
+            .reduce((min, d) => Math.min(min, d), Number.POSITIVE_INFINITY)
           if (dToStorage != null && dFromSource != null && dToStorage < best) {
             best = dToStorage
             hoId = ho.id
           }
         }
+        if (!hoId) {
+          excludedStorages.push({ storageNodeId: n.id, reason: 'Needs handover but no reachable handover' })
+          continue
+        }
       }
-      dispatchCandidates.push({
-        storageNodeId: n.id,
-        aisleId: n.aisleId,
-        branch: needsHo ? 'XPL' : 'XQE',
-        handoverNodeId: hoId,
-        cost: Math.max(1, needsHo ? (distFromHandoverAll.get(hoId ?? '')?.get(n.id) ?? sourceDist) : sourceDist),
-      })
+      const storageSideBranch: 'XQE' | 'XNA' = n.kind === 'rack_aisle' && siteMode === 'XNA' ? 'XNA' : 'XQE'
+      if (!existingInbound.has(n.id)) {
+        if (inboundNeedsHo) {
+          const restToHo = allDistFromRest.get(hoId ?? '') ?? 0
+          const sourceToHo = nonRackDistBySourceForHo
+            .find((entry) => entry.sourceId === chosenInboundSourceId)
+            ?.dist.get(hoId ?? '') ?? 0
+          const hoToStorage = distFromHandoverAll.get(hoId ?? '')?.get(n.id) ?? sourceDist
+          const restToStorage = allDistFromRest.get(n.id) ?? 0
+          inboundCandidates.push({
+            storageNodeId: n.id,
+            aisleId: nodeAisleId.get(n.id),
+            branch: 'XPL',
+            handoverNodeId: hoId,
+            storageSideBranch: storageSideBranch,
+            cost: Math.max(1, restToHo + sourceToHo + restToHo + restToStorage + hoToStorage + restToStorage),
+          })
+        } else {
+          const inboundCost = (allDistFromRest.get(chosenInboundSourceId) ?? 0) + sourceDist + (allDistFromRest.get(n.id) ?? 0)
+          inboundCandidates.push({
+            storageNodeId: n.id,
+            aisleId: nodeAisleId.get(n.id),
+            branch: directBranch,
+            handoverNodeId: undefined,
+            storageSideBranch: directBranch,
+            cost: Math.max(1, inboundCost),
+          })
+        }
+      }
+      if (!existingOutbound.has(n.id)) {
+        if (outboundNeedsHo) {
+          const restToHo = allDistFromRest.get(hoId ?? '') ?? 0
+          const hoToStorage = distFromHandoverAll.get(hoId ?? '')?.get(n.id) ?? sourceDist
+          const restToStorage = allDistFromRest.get(n.id) ?? 0
+          const bestOutboundDist = distFromOutboundByGate.length > 0
+            ? distFromOutboundByGate.reduce((min, map) => Math.min(min, map.get(hoId ?? '') ?? Number.POSITIVE_INFINITY), Number.POSITIVE_INFINITY)
+            : 0
+          outboundCandidates.push({
+            storageNodeId: n.id,
+            aisleId: nodeAisleId.get(n.id),
+            branch: storageSideBranch,
+            handoverNodeId: hoId,
+            storageSideBranch: storageSideBranch,
+            cost: Math.max(1, restToStorage + hoToStorage + restToStorage + restToHo + (Number.isFinite(bestOutboundDist) ? bestOutboundDist : 0) + restToHo),
+          })
+        } else {
+          const outboundCost = (allDistFromRest.get(n.id) ?? 0) + (Number.isFinite(bestOutbound) ? bestOutbound : 0) + (distFromOutboundByGate.length > 0 ? Number.isFinite(bestOutbound) ? bestOutbound : 0 : (allDistFromRest.get(n.id) ?? 0))
+          outboundCandidates.push({
+            storageNodeId: n.id,
+            aisleId: nodeAisleId.get(n.id),
+            branch: directBranch,
+            handoverNodeId: undefined,
+            storageSideBranch: directBranch,
+            cost: Math.max(1, outboundCost),
+          })
+        }
+      }
     }
   }
 
-  if (totalTasks > 0 && dispatchCandidates.length > 0) {
-    // Randomized storage selection for task assignment as requested.
-    for (let i = 0; i < totalTasks; i += 1) {
-      const idx = Math.floor(rng() * dispatchCandidates.length)
-      const c = dispatchCandidates[idx]
+  const assignTasks = (
+    taskCount: number,
+    candidates: typeof inboundCandidates,
+    routeLoad: Map<number, number>,
+    direction: 'inbound' | 'outbound'
+  ) => {
+    if (taskCount <= 0 || candidates.length === 0) return
+    const shuffled = [...candidates]
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(rng() * (i + 1))
+      const tmp = shuffled[i]
+      shuffled[i] = shuffled[j]
+      shuffled[j] = tmp
+    }
+    const baseAssignments = Math.min(taskCount, shuffled.length)
+    for (let i = 0; i < baseAssignments; i += 1) {
+      const c = shuffled[i]
       const cur = storageTaskMap.get(c.storageNodeId)
       if (cur) {
         cur.tasksPerDay += 1
+        if (direction === 'inbound') {
+          cur.inboundTasksPerDay += 1
+          cur.inboundBranch = c.branch
+          cur.inboundHandover = !!c.handoverNodeId
+          cur.inboundHandoverNodeId = c.handoverNodeId
+          cur.inboundStorageSideBranch = c.storageSideBranch
+        } else {
+          cur.outboundTasksPerDay += 1
+          cur.outboundBranch = c.branch
+          cur.outboundHandover = !!c.handoverNodeId
+          cur.outboundHandoverNodeId = c.handoverNodeId
+          cur.outboundStorageSideBranch = c.storageSideBranch
+        }
       } else {
         storageTaskMap.set(c.storageNodeId, {
           tasksPerDay: 1,
+          inboundTasksPerDay: direction === 'inbound' ? 1 : 0,
+          outboundTasksPerDay: direction === 'outbound' ? 1 : 0,
           aisleId: c.aisleId,
           handoverNodeId: c.handoverNodeId,
-          branch: c.branch,
+          inboundHandoverNodeId: direction === 'inbound' ? c.handoverNodeId : undefined,
+          outboundHandoverNodeId: direction === 'outbound' ? c.handoverNodeId : undefined,
+          storageMode: (() => {
+            const node = activeStorageNodes.find((n) => n.id === c.storageNodeId)
+            if (!node) return 'rack'
+            return node.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack'
+          })(),
+          inboundHandover: direction === 'inbound' ? !!c.handoverNodeId : false,
+          outboundHandover: direction === 'outbound' ? !!c.handoverNodeId : false,
+          inboundBranch: direction === 'inbound' ? c.branch : 'unknown',
+          outboundBranch: direction === 'outbound' ? c.branch : 'unknown',
+          inboundStorageSideBranch: direction === 'inbound' ? c.storageSideBranch : undefined,
+          outboundStorageSideBranch: direction === 'outbound' ? c.storageSideBranch : undefined,
         })
       }
+      if (c.aisleId != null) routeLoad.set(c.aisleId, (routeLoad.get(c.aisleId) ?? 0) + 1)
+    }
+    for (let i = baseAssignments; i < taskCount; i += 1) {
+      const poolSize = Math.min(5, candidates.length)
+      let best: typeof candidates[number] | undefined
+      let bestScore = Number.POSITIVE_INFINITY
+      for (let k = 0; k < poolSize; k += 1) {
+        const idx = Math.floor(rng() * candidates.length)
+        const c = candidates[idx]
+        const load = c.aisleId != null ? (routeLoad.get(c.aisleId) ?? 0) : 0
+        const score = c.cost * (1 + load / 25)
+        if (score < bestScore) {
+          bestScore = score
+          best = c
+        }
+      }
+      const c = best ?? candidates[Math.floor(rng() * candidates.length)]
+      const cur = storageTaskMap.get(c.storageNodeId)
+      if (cur) {
+        cur.tasksPerDay += 1
+        if (direction === 'inbound') {
+          cur.inboundTasksPerDay += 1
+          cur.inboundBranch = c.branch
+          cur.inboundHandover = !!c.handoverNodeId
+          cur.inboundHandoverNodeId = c.handoverNodeId
+          cur.inboundStorageSideBranch = c.storageSideBranch
+        } else {
+          cur.outboundTasksPerDay += 1
+          cur.outboundBranch = c.branch
+          cur.outboundHandover = !!c.handoverNodeId
+          cur.outboundHandoverNodeId = c.handoverNodeId
+          cur.outboundStorageSideBranch = c.storageSideBranch
+        }
+      } else {
+        storageTaskMap.set(c.storageNodeId, {
+          tasksPerDay: 1,
+          inboundTasksPerDay: direction === 'inbound' ? 1 : 0,
+          outboundTasksPerDay: direction === 'outbound' ? 1 : 0,
+          aisleId: c.aisleId,
+          handoverNodeId: c.handoverNodeId,
+          inboundHandoverNodeId: direction === 'inbound' ? c.handoverNodeId : undefined,
+          outboundHandoverNodeId: direction === 'outbound' ? c.handoverNodeId : undefined,
+          storageMode: (() => {
+            const node = activeStorageNodes.find((n) => n.id === c.storageNodeId)
+            if (!node) return 'rack'
+            return node.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack'
+          })(),
+          inboundHandover: direction === 'inbound' ? !!c.handoverNodeId : false,
+          outboundHandover: direction === 'outbound' ? !!c.handoverNodeId : false,
+          inboundBranch: direction === 'inbound' ? c.branch : 'unknown',
+          outboundBranch: direction === 'outbound' ? c.branch : 'unknown',
+          inboundStorageSideBranch: direction === 'inbound' ? c.storageSideBranch : undefined,
+          outboundStorageSideBranch: direction === 'outbound' ? c.storageSideBranch : undefined,
+        })
+      }
+      if (c.aisleId != null) routeLoad.set(c.aisleId, (routeLoad.get(c.aisleId) ?? 0) + 1)
     }
   }
+  assignTasks(inboundDaily, inboundCandidates, inboundRouteLoad, 'inbound')
+  assignTasks(outboundDaily, outboundCandidates, outboundRouteLoad, 'outbound')
 
   for (const a of aisles) {
     a.assignedTasks = 0
@@ -392,14 +639,72 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     }
   }
 
+  const workloadBuckets = {
+    horizontal_xpl_inbound: 0,
+    horizontal_xpl_outbound: 0,
+    horizontal_xqe_inbound: 0,
+    horizontal_xqe_outbound: 0,
+    stacking_xqe_inbound: 0,
+    stacking_xqe_outbound: 0,
+    horizontal_xpl: 0,
+    horizontal_xqe: 0,
+    stacking_xqe: 0,
+  }
+
+  for (const [storageNodeId, value] of storageTaskMap.entries()) {
+    const mode = value.storageMode
+    if (value.inboundHandover) {
+      workloadBuckets.horizontal_xpl_inbound += value.inboundTasksPerDay
+      if (value.inboundStorageSideBranch === 'XQE' || value.inboundStorageSideBranch === 'XNA') {
+        workloadBuckets.horizontal_xqe_inbound += value.inboundTasksPerDay
+      }
+    } else if (value.inboundBranch === 'XPL') {
+      workloadBuckets.horizontal_xpl_inbound += value.inboundTasksPerDay
+    } else if (value.inboundBranch === 'XQE' || value.inboundBranch === 'XNA') {
+      workloadBuckets.horizontal_xqe_inbound += value.inboundTasksPerDay
+    }
+
+    if (value.outboundHandover) {
+      workloadBuckets.horizontal_xpl_outbound += value.outboundTasksPerDay
+      if (value.outboundStorageSideBranch === 'XQE' || value.outboundStorageSideBranch === 'XNA') {
+        workloadBuckets.horizontal_xqe_outbound += value.outboundTasksPerDay
+      }
+    } else if (value.outboundBranch === 'XPL') {
+      workloadBuckets.horizontal_xpl_outbound += value.outboundTasksPerDay
+    } else if (value.outboundBranch === 'XQE' || value.outboundBranch === 'XNA') {
+      workloadBuckets.horizontal_xqe_outbound += value.outboundTasksPerDay
+    }
+
+    if (mode === 'ground_stacking') {
+      workloadBuckets.stacking_xqe_inbound += value.inboundTasksPerDay
+      workloadBuckets.stacking_xqe_outbound += value.outboundTasksPerDay
+    }
+  }
+  workloadBuckets.horizontal_xpl = workloadBuckets.horizontal_xpl_inbound + workloadBuckets.horizontal_xpl_outbound
+  workloadBuckets.horizontal_xqe = workloadBuckets.horizontal_xqe_inbound + workloadBuckets.horizontal_xqe_outbound
+  workloadBuckets.stacking_xqe = workloadBuckets.stacking_xqe_inbound + workloadBuckets.stacking_xqe_outbound
+
   return {
     aisles,
+    workloadBuckets,
     storageTaskBreakdown: [...storageTaskMap.entries()].map(([storageNodeId, v]) => ({
       storageNodeId,
       tasksPerDay: v.tasksPerDay,
+      inboundTasksPerDay: v.inboundTasksPerDay,
+      outboundTasksPerDay: v.outboundTasksPerDay,
       aisleId: v.aisleId,
       handoverNodeId: v.handoverNodeId,
-      branch: v.branch,
+      inboundHandoverNodeId: v.inboundHandoverNodeId,
+      outboundHandoverNodeId: v.outboundHandoverNodeId,
+      storageMode: v.storageMode,
+      inboundStorageSideBranch: v.inboundStorageSideBranch,
+      outboundStorageSideBranch: v.outboundStorageSideBranch,
+      inboundBranch: v.inboundHandover
+        ? `XPL+${v.inboundStorageSideBranch ?? v.inboundBranch}`
+        : v.inboundBranch,
+      outboundBranch: v.outboundHandover
+        ? `${v.outboundStorageSideBranch ?? v.outboundBranch}+XPL`
+        : v.outboundBranch,
     })),
     diagnostics: {
       excludedStorages,

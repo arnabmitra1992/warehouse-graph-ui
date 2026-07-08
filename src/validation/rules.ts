@@ -14,18 +14,35 @@ export function validateGraph(
 
   // E-SCEN-001
   const sourceGates = nodes.filter(n => n.data?.kind === 'source_gate')
-  if (sourceGates.length !== 1) {
+  if (sourceGates.length === 0) {
     issues.push({
       code: 'E-SCEN-001',
       severity: 'error',
-      message: 'Rack scenario requires exactly one source_gate node.',
+      message: 'Rack scenario requires at least one source_gate node.',
+    })
+  } else if (sourceGates.length > 1) {
+    issues.push({
+      code: 'W-SCEN-001',
+      severity: 'warning',
+      message: 'Multiple source_gate nodes found. The nearest reachable source gate is used per aisle for inbound checks.',
       nodeIds: sourceGates.map(n => n.id),
+    })
+  }
+
+  const restPoints = nodes.filter(n => n.data?.kind === 'rest_point')
+  if (restPoints.length > 1) {
+    issues.push({
+      code: 'W-REST-001',
+      severity: 'warning',
+      message: 'More than one rest_point node found. The simulator currently uses the first one only.',
+      nodeIds: restPoints.map((n) => n.id),
     })
   }
 
   const storageTypes = settings.simulator.storageTypesInUse
   const useRack = storageTypes.includes('rack')
   const useGround = storageTypes.includes('ground_storage') || storageTypes.includes('ground_stacking')
+  const forceExplicitHandover = !!settings.simulator.forceExplicitHandover
 
   // E-RACK-001
   const rackAisles = nodes.filter(n => n.data?.kind === 'rack_aisle')
@@ -197,16 +214,25 @@ export function validateGraph(
   }
 
   // E-HO-010: handover reachable from source_gate on non-rack edges
-  if (sourceGates.length === 1) {
-    const sg = sourceGates[0]
+  if (sourceGates.length > 0) {
     const nonRackAdj = buildAdjacency(nonRackEdges)
-    const distFromSG = dijkstra(nonRackAdj, sg.id)
     const allAdj = buildAdjacency(edges)
-    const distAllFromSG = dijkstra(allAdj, sg.id)
+    const distFromAnySGMaps = sourceGates.map((sg) => dijkstra(nonRackAdj, sg.id))
+    const distAllFromAnySGMaps = sourceGates.map((sg) => dijkstra(allAdj, sg.id))
+    const minDistance = (maps: Map<string, number>[], nodeId: string): number | undefined => {
+      let best = Number.POSITIVE_INFINITY
+      for (const dist of maps) {
+        const d = dist.get(nodeId)
+        if (d != null && d < best) best = d
+      }
+      return Number.isFinite(best) ? best : undefined
+    }
 
     if (useGround) {
       const groundStorageNodes = nodes.filter(n => n.data?.kind === 'ground_storage')
-      const minGroundDist = Math.min(...groundStorageNodes.map((n) => distAllFromSG.get(n.id) ?? Number.POSITIVE_INFINITY))
+      const minGroundDist = Math.min(
+        ...groundStorageNodes.map((n) => minDistance(distAllFromAnySGMaps, n.id) ?? Number.POSITIVE_INFINITY)
+      )
       if (Number.isFinite(minGroundDist) && minGroundDist >= 50) {
         const hasAnyHandover = nodes.some(n => n.data?.kind === 'handover')
         if (!hasAnyHandover) {
@@ -239,10 +265,14 @@ export function validateGraph(
         continue
       }
       const sourceToRackDist = aisleStorageNodes
-        .map((n) => distAllFromSG.get(n.id))
+        .map((n) => minDistance(distAllFromAnySGMaps, n.id))
         .filter((d): d is number => d != null)
         .reduce((min, d) => Math.min(min, d), Number.POSITIVE_INFINITY)
-      const needsHandover = (sourceToRackDist ?? 0) >= 50
+      const aisleTaggedHandovers = allHandovers.filter((h) => h.data?.aisleId === aisleId)
+      const explicitHandoverRequested =
+        forceExplicitHandover &&
+        aisleTaggedHandovers.length > 0
+      const needsHandover = explicitHandoverRequested || (sourceToRackDist ?? 0) >= 50
 
       if (needsHandover && allHandovers.length === 0) {
         const distLabel = Number.isFinite(sourceToRackDist) ? sourceToRackDist.toFixed(1) : 'n/a'
@@ -257,12 +287,12 @@ export function validateGraph(
         // No handover is valid under 50m: direct XQE/XNA storage leg checks still apply.
         continue
       }
-      const aisleTagged = allHandovers.filter((h) => h.data?.aisleId === aisleId)
+      const aisleTagged = aisleTaggedHandovers
       const shared = allHandovers.filter((h) => h.data?.aisleId == null)
       const preferred = aisleTagged.length > 0 ? aisleTagged : shared
       const candidates = preferred.length > 0 ? preferred : allHandovers
       const candidate = candidates
-        .map((h) => ({ h, d: distFromSG.get(h.id) }))
+        .map((h) => ({ h, d: minDistance(distFromAnySGMaps, h.id) }))
         .filter((x): x is { h: (typeof candidates)[number]; d: number } => x.d != null)
         .sort((a, b) => a.d - b.d)[0]
       if (!candidate) {
@@ -275,7 +305,7 @@ export function validateGraph(
       }
       const ho = candidate.h
 
-      if (!distFromSG.has(ho.id)) {
+      if (minDistance(distFromAnySGMaps, ho.id) == null) {
         issues.push({
           code: 'E-HO-010',
           severity: 'error',
@@ -289,13 +319,13 @@ export function validateGraph(
       if (needsHandover) {
         // If handover is required by source->storage distance, SG->HO must be XPL-capable.
         const xplAdj = buildAdjacency(nonRackEdges, 2.60)
-        const xplDist = dijkstra(xplAdj, sg.id)
-        if (!xplDist.has(ho.id)) {
+        const xplDistMaps = sourceGates.map((sg) => dijkstra(xplAdj, sg.id))
+        if (minDistance(xplDistMaps, ho.id) == null) {
           issues.push({
             code: 'E-BR-011',
             severity: 'error',
             message: `Aisle ${aisleId}: handover required by 50m rule but no feasible XPL path source_gate\u2192handover (requires width \u2265 2.60m).`,
-            nodeIds: [sg.id, ho.id],
+            nodeIds: [ho.id],
           })
         }
       }
@@ -338,15 +368,6 @@ export function validateGraph(
           }
         }
       }
-    }
-  } else {
-    // E-BR-001 for all aisles when no source gate
-    for (const aisleId of aisleIds) {
-      issues.push({
-        code: 'E-BR-001',
-        severity: 'error',
-        message: `Aisle ${aisleId}: cannot compute distance source_gate\u2192handover (handover unreachable on non-rack network).`,
-      })
     }
   }
 

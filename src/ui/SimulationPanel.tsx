@@ -5,6 +5,10 @@ import { compileGraph } from '../simulation/compiler'
 import type { AisleResult } from '../simulation/types'
 import { compileSimulatorConfig } from '../integration/simulatorConfig'
 
+const simulatorApiBaseUrl = (
+  import.meta.env.VITE_SIMULATOR_API_BASE_URL || 'http://127.0.0.1:8000'
+).replace(/\/$/, '')
+
 function normalizeReportText(raw: string): string {
   return raw
     .replaceAll('XPL_201 HANDOVER WORKFLOW', 'XPL_201 HORIZONTAL TRANSPORT (SG → HANDOVER)')
@@ -116,25 +120,41 @@ export function SimulationPanel() {
     try {
       const graph = compileGraph(nodes, edges, settings)
       const localResult = runSimulation(graph, settings)
-      const breakdown = localResult.storageTaskBreakdown ?? []
-      const horizontalXpl = breakdown.reduce((s, a) => s + (a.branch === 'XPL' ? a.tasksPerDay : 0), 0)
-      const horizontalXqe = breakdown.reduce((s, a) => s + (a.branch === 'XQE' ? a.tasksPerDay : 0), 0)
-      const stackingXqe = breakdown.reduce((s, a) => s + a.tasksPerDay, 0)
+      const buckets = localResult.workloadBuckets ?? {
+        horizontal_xpl: 0,
+        horizontal_xqe: 0,
+        stacking_xqe: 0,
+        horizontal_xpl_inbound: 0,
+        horizontal_xpl_outbound: 0,
+        horizontal_xqe_inbound: 0,
+        horizontal_xqe_outbound: 0,
+        stacking_xqe_inbound: 0,
+        stacking_xqe_outbound: 0,
+      }
       const config = compileSimulatorConfig(graph, settings)
+      ;(config as { Throughput_Configuration?: { Workload_Buckets?: Record<string, number> } }).Throughput_Configuration = {
+        ...((config as { Throughput_Configuration?: Record<string, unknown> }).Throughput_Configuration ?? {}),
+        Workload_Buckets: {
+          ...buckets,
+        },
+      }
       const rv = ((config as { Generated_From_Graph?: { rack_vehicle_type?: 'XNA_121' | 'XQE_122' } })
         .Generated_From_Graph?.rack_vehicle_type) ?? 'XQE_122'
       setRackVehicleType(rv)
-      const response = await fetch('http://127.0.0.1:8000/simulate', {
+      const response = await fetch(`${simulatorApiBaseUrl}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           config,
           traffic_control: settings.simulator.trafficControlEnabled,
           random_seed: settings.simulator.randomSeed ?? null,
-          workload_buckets: {
-            horizontal_xpl: horizontalXpl,
-            horizontal_xqe: horizontalXqe,
-            stacking_xqe: stackingXqe,
+          workload_buckets: buckets,
+          graph,
+          dispatch_snapshot: {
+            storageTaskBreakdown: localResult.storageTaskBreakdown ?? [],
+            operatingHours: settings.simulator.operatingHours,
+            utilizationTarget: settings.simulator.utilizationTarget,
+            rackVehicleType: rv,
           },
         }),
       })
@@ -165,10 +185,10 @@ export function SimulationPanel() {
       reportLines.push(`Required XPL Fleet: ${xplRequiredFleetCount ?? 0}`)
       reportLines.push(`Fleet Total: ${fleet?.total ?? 0}`)
       reportLines.push(`XPL Fleet: ${fleet?.xpl201 ?? 0}`)
-      reportLines.push(`Rack Fleet: ${fleet?.xqe122_rack ?? 0}`)
+      reportLines.push(`${rackVehicleShort} Rack Fleet: ${fleet?.xqe122_rack ?? 0}`)
       reportLines.push(`Stack Fleet: ${fleet?.xqe122_stacking ?? 0}`)
       reportLines.push(`XPL Cycle (s): ${cycles?.xpl201_handover?.toFixed(1) ?? '0.0'}`)
-      reportLines.push(`Rack Cycle (s): ${cycles?.xqe122_rack_avg?.toFixed(1) ?? '0.0'}`)
+      reportLines.push(`${rackVehicleShort} Rack Cycle (s): ${cycles?.xqe122_rack_avg?.toFixed(1) ?? '0.0'}`)
       reportLines.push(`Stack Cycle (s): ${cycles?.xqe122_stack_avg?.toFixed(1) ?? '0.0'}`)
       reportLines.push('')
     }
@@ -197,9 +217,20 @@ export function SimulationPanel() {
   }
 
   const localShown = !!simResult && simResult.aisles.length > 0
-  const localXplHorizontalTasks = simResult?.storageTaskBreakdown?.reduce((s, a) => s + (a.branch === 'XPL' ? a.tasksPerDay : 0), 0) ?? 0
-  const localXqeHorizontalTasks = simResult?.storageTaskBreakdown?.reduce((s, a) => s + (a.branch === 'XQE' ? a.tasksPerDay : 0), 0) ?? 0
-  const localXqeStackingTasks = simResult?.storageTaskBreakdown?.reduce((s, a) => s + a.tasksPerDay, 0) ?? 0
+  const localTotalAssignedTasks = (simResult?.storageTaskBreakdown ?? []).reduce((s, x) => s + x.tasksPerDay, 0)
+  const localBuckets = simResult?.workloadBuckets
+  const localXplHorizontalTasks = localBuckets?.horizontal_xpl ?? 0
+  const localXqeHorizontalTasks = localBuckets?.horizontal_xqe ?? 0
+  const localXqeStackingTasks = localBuckets?.stacking_xqe ?? 0
+  const localRackVehicleType: 'XNA_121' | 'XQE_122' = (() => {
+    const rackEdges = edges.filter((e) => e.data?.preset === 'rack_aisle')
+    const hasXna = rackEdges.some((e) => {
+      const w = e.data?.widthM ?? 0
+      return w >= 1.75 && w <= 1.8
+    })
+    const hasXqe = rackEdges.some((e) => (e.data?.widthM ?? 0) >= 2.84)
+    return hasXna && !hasXqe ? 'XNA_121' : 'XQE_122'
+  })()
   const fleet = backendResult?.fleet_sizes
   const cycles = backendResult?.cycle_times_s
   const outbound = backendResult?.outbound_workflow
@@ -210,6 +241,16 @@ export function SimulationPanel() {
     ?? fleet?.xpl201
   const useRack = settings.simulator.storageTypesInUse.includes('rack')
   const useGround = settings.simulator.storageTypesInUse.includes('ground_storage') || settings.simulator.storageTypesInUse.includes('ground_stacking')
+  const shownRackFleet = useRack ? (fleet?.xqe122_rack ?? 0) : 0
+  const shownXplFleet = fleet?.xpl201 ?? 0
+  const shownStackFleet = fleet?.xqe122_stacking ?? 0
+  const shownFleetTotal = shownXplFleet + shownRackFleet + shownStackFleet
+  const rackVehicleShort = rackVehicleType === 'XNA_121' ? 'XNA' : 'XQE'
+  const rackVehicleFleetLabel = rackVehicleType === 'XNA_121' ? 'XNA Rack Fleet' : 'XQE Rack Fleet'
+  const rackVehicleCycleLabel = rackVehicleType === 'XNA_121' ? 'XNA Rack Cycle (s)' : 'XQE Rack Cycle (s)'
+  const rackVehicleHorizontalLabel = rackVehicleType === 'XNA_121' ? 'XNA Horizontal' : 'XQE Horizontal'
+  const rackVehicleInboundOutboundLabel = rackVehicleType === 'XNA_121' ? 'XNA Inbound/Outbound' : 'XQE Inbound/Outbound'
+  const localRackVehicleHorizontalLabel = localRackVehicleType === 'XNA_121' ? 'XNA Horizontal Tasks/day' : 'XQE Horizontal Tasks/day'
 
   return (
     <div className="flex flex-col h-full">
@@ -269,19 +310,16 @@ export function SimulationPanel() {
         {backendResult && (
           <div className="px-3 py-2 border-b border-gray-700 bg-gray-800 text-xs text-gray-200">
             <div className="font-semibold text-gray-300 mb-1">Backend Simulator Result</div>
-            <div className="mb-2 bg-amber-900/40 text-amber-100 rounded px-3 py-2 border border-amber-700 font-semibold">
-              Required XPL Fleet Count: {xplRequiredFleetCount ?? '—'}
-            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Fleet Total: {fleet?.total ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Fleet: {fleet?.xpl201 ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Rack Fleet: {fleet?.xqe122_rack ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Stack Fleet: {fleet?.xqe122_stacking ?? 0}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Fleet Total: {shownFleetTotal}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Fleet: {shownXplFleet}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">{rackVehicleFleetLabel}: {shownRackFleet}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Stack Fleet: {shownStackFleet}</div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Cycle (s): {cycles?.xpl201_handover?.toFixed(1) ?? '0.0'}</div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
                 {!useRack
                   ? 'Rack Cycle (s): —'
-                  : `XQE Rack Cycle (s): ${cycles?.xqe122_rack_avg?.toFixed(1) ?? '0.0'}`}
+                  : `${rackVehicleCycleLabel}: ${cycles?.xqe122_rack_avg?.toFixed(1) ?? '0.0'}`}
               </div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
                 {!useGround
@@ -291,20 +329,20 @@ export function SimulationPanel() {
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Block Policy: {outbound?.block_storage_policy ?? '—'}</div>
             </div>
             <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV XPL_201: {fleet?.xpl201 ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV {rackVehicleType} (Rack): {fleet?.xqe122_rack ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV XQE_122 (Stack): {fleet?.xqe122_stacking ?? 0}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Dispatch Fleet Total: {fleet?.dispatch_total ?? fleet?.total ?? 0}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV XPL_201: {shownXplFleet}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV {rackVehicleType} (Rack): {shownRackFleet}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">AGV XQE_122 (Stack): {shownStackFleet}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Dispatch Fleet Total: {shownFleetTotal}</div>
             </div>
             {fleet?.workload_buckets && (
               <div className="mt-2">
                 <div className="font-semibold text-gray-300 mb-1">Backend Workload Buckets (tasks/day)</div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Horizontal: {Math.round(fleet.workload_buckets.horizontal_xpl ?? 0)}</div>
-                  <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Horizontal: {Math.round(fleet.workload_buckets.horizontal_xqe ?? 0)}</div>
+                  <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">{rackVehicleHorizontalLabel}: {Math.round(fleet.workload_buckets.horizontal_xqe ?? 0)}</div>
                   <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Stacking: {Math.round(fleet.workload_buckets.stacking_xqe ?? 0)}</div>
                   <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Inbound/Outbound: {Math.round(fleet.workload_buckets.horizontal_xpl_inbound ?? 0)} / {Math.round(fleet.workload_buckets.horizontal_xpl_outbound ?? 0)}</div>
-                  <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Inbound/Outbound: {Math.round(fleet.workload_buckets.horizontal_xqe_inbound ?? 0)} / {Math.round(fleet.workload_buckets.horizontal_xqe_outbound ?? 0)}</div>
+                  <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">{rackVehicleInboundOutboundLabel}: {Math.round(fleet.workload_buckets.horizontal_xqe_inbound ?? 0)} / {Math.round(fleet.workload_buckets.horizontal_xqe_outbound ?? 0)}</div>
                   <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">Stack Inbound/Outbound: {Math.round(fleet.workload_buckets.stacking_xqe_inbound ?? 0)} / {Math.round(fleet.workload_buckets.stacking_xqe_outbound ?? 0)}</div>
                 </div>
                 <div className="mt-2 bg-gray-900 rounded px-2 py-1 border border-gray-700">
@@ -353,8 +391,19 @@ export function SimulationPanel() {
             <div className="font-semibold text-gray-300 mb-1">Dispatch Split (from path assignment)</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XPL Horizontal Tasks/day: {localXplHorizontalTasks}</div>
-              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Horizontal Tasks/day: {localXqeHorizontalTasks}</div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">{localRackVehicleHorizontalLabel}: {localXqeHorizontalTasks}</div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">XQE Stacking Tasks/day: {localXqeStackingTasks}</div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
+                Active Storage Rows: {simResult?.storageTaskBreakdown?.length ?? 0}
+              </div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
+                Excluded Storages: {simResult?.diagnostics?.excludedStorages?.length ?? 0}
+              </div>
+              <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
+                Total Assigned Tasks/day: {localTotalAssignedTasks}
+              </div>
             </div>
             {!!simResult?.storageTaskBreakdown?.length && (
               <table className="w-full text-[10px] mt-2 border border-gray-700">
@@ -362,9 +411,14 @@ export function SimulationPanel() {
                   <tr>
                     <th className="px-2 py-1 text-left">Storage</th>
                     <th className="px-2 py-1 text-left">Aisle</th>
-                    <th className="px-2 py-1 text-left">Branch</th>
-                    <th className="px-2 py-1 text-left">Handover</th>
+                    <th className="px-2 py-1 text-left">Inbound</th>
+                    <th className="px-2 py-1 text-left">Outbound</th>
+                    <th className="px-2 py-1 text-left">In Branch</th>
+                    <th className="px-2 py-1 text-left">Out Branch</th>
+                    <th className="px-2 py-1 text-left">In HO</th>
+                    <th className="px-2 py-1 text-left">Out HO</th>
                     <th className="px-2 py-1 text-left">Tasks/day</th>
+                    <th className="px-2 py-1 text-left">Task Share</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -372,9 +426,28 @@ export function SimulationPanel() {
                     <tr key={s.storageNodeId} className="border-t border-gray-700">
                       <td className="px-2 py-1 font-mono">{s.storageNodeId}</td>
                       <td className="px-2 py-1">#{s.aisleId ?? '—'}</td>
-                      <td className="px-2 py-1">{s.branch}</td>
-                      <td className="px-2 py-1 font-mono">{s.handoverNodeId ?? '—'}</td>
+                      <td className="px-2 py-1 font-mono">{s.inboundTasksPerDay}</td>
+                      <td className="px-2 py-1 font-mono">{s.outboundTasksPerDay}</td>
+                      <td className="px-2 py-1">{s.inboundBranch}</td>
+                      <td className="px-2 py-1">{s.outboundBranch}</td>
+                      <td className="px-2 py-1 font-mono">{s.inboundHandoverNodeId ?? '—'}</td>
+                      <td className="px-2 py-1 font-mono">{s.outboundHandoverNodeId ?? '—'}</td>
                       <td className="px-2 py-1 font-mono">{s.tasksPerDay}</td>
+                      <td className="px-2 py-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-24 h-2 rounded bg-gray-700 overflow-hidden">
+                            <div
+                              className="h-full bg-cyan-400"
+                              style={{
+                                width: `${localTotalAssignedTasks > 0 ? (s.tasksPerDay / localTotalAssignedTasks) * 100 : 0}%`,
+                              }}
+                            />
+                          </div>
+                          <span className="font-mono">
+                            {localTotalAssignedTasks > 0 ? `${((s.tasksPerDay / localTotalAssignedTasks) * 100).toFixed(1)}%` : '0.0%'}
+                          </span>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
