@@ -158,7 +158,16 @@ export function SimulationPanel() {
           },
         }),
       })
-      const body = (await response.json()) as BackendSimulationResponse
+      const rawBody = await response.text()
+      let body: BackendSimulationResponse
+      try {
+        body = JSON.parse(rawBody) as BackendSimulationResponse
+      } catch {
+        const message = rawBody.trim()
+          ? `Backend returned non-JSON response (${response.status}): ${rawBody.slice(0, 300)}`
+          : `Backend returned empty response (${response.status})`
+        throw new Error(message)
+      }
       if (!response.ok || !body.ok) {
         throw new Error(body.error || `Backend error (${response.status})`)
       }
