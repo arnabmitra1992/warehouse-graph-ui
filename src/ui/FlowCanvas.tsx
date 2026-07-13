@@ -44,6 +44,7 @@ function FlowCanvasInner() {
     highlightedNodeIds,
     highlightedEdgeIds,
     underlay,
+    settings,
   } = useStore()
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
@@ -80,12 +81,22 @@ function FlowCanvasInner() {
               ? 'REST'
               : undefined,
           storageType: kind === 'rack_aisle' ? 'rack' : kind === 'ground_storage' ? 'ground_storage' : undefined,
+          blockRows: kind === 'ground_storage' ? settings.simulator.stackingRows : undefined,
+          blockColumns: kind === 'ground_storage' ? settings.simulator.stackingColumns : undefined,
+          blockLevels: kind === 'ground_storage'
+            ? (settings.simulator.storageTypesInUse.includes('ground_stacking') && !settings.simulator.storageTypesInUse.includes('ground_storage')
+              ? settings.simulator.stackingLevels
+              : 1)
+            : undefined,
+          boxLengthMm: kind === 'ground_storage' ? settings.simulator.stackingBoxLengthMm : undefined,
+          boxWidthMm: kind === 'ground_storage' ? settings.simulator.stackingBoxWidthMm : undefined,
+          clearanceMm: kind === 'ground_storage' ? settings.simulator.stackingClearanceMm : undefined,
         },
       }
 
       addNode(newNode)
     },
-    [screenToFlowPosition, addNode]
+    [screenToFlowPosition, addNode, settings]
   )
 
   const onNodeClick = useCallback(

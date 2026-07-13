@@ -154,10 +154,76 @@ function deriveGeometry(graph: SimGraph) {
   }
 }
 
+function deriveGroundStorageDefaults(graph: SimGraph, settings?: AppSettings) {
+  const sim = settings?.simulator
+  const groundNodes = graph.nodes.filter((n) => n.kind === 'ground_storage')
+  if (groundNodes.length === 0) {
+    const levels = Math.max(1, sim?.stackingLevels ?? 3)
+    return {
+      rows: Math.max(1, sim?.stackingRows ?? 10),
+      columns: Math.max(1, sim?.stackingColumns ?? 12),
+      levels,
+      boxLengthMm: Math.max(100, sim?.stackingBoxLengthMm ?? 1200),
+      boxWidthMm: Math.max(100, sim?.stackingBoxWidthMm ?? 800),
+      clearanceMm: Math.max(0, sim?.stackingClearanceMm ?? 200),
+      boxHeightMm: Math.round(4500 / levels),
+      perNode: [],
+    }
+  }
+
+  const resolved = groundNodes.map((n) => {
+    const storageType = n.storageType === 'ground_stacking' ? 'ground_stacking' : 'ground_storage'
+    const levels = storageType === 'ground_stacking'
+      ? Math.max(1, n.blockLevels ?? sim?.stackingLevels ?? 3)
+      : 1
+    const rows = Math.max(1, n.blockRows ?? sim?.stackingRows ?? 10)
+    const columns = Math.max(1, n.blockColumns ?? sim?.stackingColumns ?? 12)
+    const boxLengthMm = Math.max(100, n.boxLengthMm ?? sim?.stackingBoxLengthMm ?? 1200)
+    const boxWidthMm = Math.max(100, n.boxWidthMm ?? sim?.stackingBoxWidthMm ?? 800)
+    const clearanceMm = Math.max(0, n.clearanceMm ?? sim?.stackingClearanceMm ?? 200)
+    const storageCapacity = rows * columns * levels
+    return {
+      id: n.id,
+      storageType,
+      rows,
+      columns,
+      levels,
+      boxLengthMm,
+      boxWidthMm,
+      clearanceMm,
+      boxHeightMm: Math.round(4500 / levels),
+      storageCapacity,
+    }
+  })
+
+  const totalWeight = resolved.reduce((sum, n) => sum + n.storageCapacity, 0) || resolved.length
+  const weighted = <K extends 'rows' | 'columns' | 'levels' | 'boxLengthMm' | 'boxWidthMm' | 'clearanceMm'>(key: K) =>
+    Math.round(resolved.reduce((sum, n) => sum + n[key] * n.storageCapacity, 0) / totalWeight)
+
+  const levels = Math.max(1, weighted('levels'))
+  return {
+    rows: Math.max(1, weighted('rows')),
+    columns: Math.max(1, weighted('columns')),
+    levels,
+    boxLengthMm: Math.max(100, weighted('boxLengthMm')),
+    boxWidthMm: Math.max(100, weighted('boxWidthMm')),
+    clearanceMm: Math.max(0, weighted('clearanceMm')),
+    boxHeightMm: Math.round(4500 / levels),
+    perNode: resolved,
+  }
+}
+
 export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings): JsonObject {
   const simInput = settings?.simulator
   const rackMode = detectRackMode(graph)
   const geometry = deriveGeometry(graph)
+  const groundDefaults = deriveGroundStorageDefaults(graph, settings)
+  const rackVehicleType = rackMode === 'XNA' ? 'XNA_121' : 'XQE_122'
+  const rackVehicleMaxLiftMm = rackMode === 'XNA' ? 8500 : 4500
+  const rackLevels = Math.max(1, simInput?.rackLevels ?? 3)
+  const derivedRackLevelHeightMm = Math.round(rackVehicleMaxLiftMm / rackLevels)
+  const stackingLevels = groundDefaults.levels
+  const derivedStackLevelHeightMm = groundDefaults.boxHeightMm
 
   const headAisleToHandoverMm = toMm(geometry.sourceToHandoverM ?? 8, 8000)
   const headAisleToOutboundMm = toMm(geometry.sourceToOutboundM ?? 10, 10000)
@@ -204,7 +270,6 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
     xqeRackPct = 0
     xqeStackPct = 0
   }
-  const rackVehicleType = rackMode === 'XNA' ? 'XNA_121' : 'XQE_122'
   const turnNodeCount = graph.nodes.filter((n) => n.kind === 'turn').length
   const configuredIntersections = simInput?.intersectionCount ?? 0
   const effectiveIntersectionCount = Math.max(configuredIntersections, turnNodeCount)
@@ -215,7 +280,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         forward_speed_ms: 1.0,
         reverse_speed_ms: 0.3,
         lift_speed_ms: 0.2,
-        max_lift_height_mm: Math.max(4500, simInput?.rackHeightMm ?? 4500),
+        max_lift_height_mm: 4500,
         pickup_time_s: 30,
         dropoff_time_s: 30,
       },
@@ -229,7 +294,7 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         forward_speed_ms: 1.0,
         reverse_speed_ms: 1.0,
         lift_speed_ms: 0.2,
-        max_lift_height_mm: Math.max(8500, simInput?.rackHeightMm ?? 8500),
+        max_lift_height_mm: 8500,
         pickup_time_s: 30,
         dropoff_time_s: 30,
       },
@@ -257,28 +322,28 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
     },
     Rack_Configuration: {
       Rack_Length_mm: rackAisleLengthMm,
-      Rack_Height_mm: simInput?.rackHeightMm ?? ((simInput?.rackLevels ?? 3) * (simInput?.shelfHeightSpacingMm ?? 1300)),
+      Rack_Height_mm: rackVehicleMaxLiftMm,
       Pallet_Width_mm: 800,
-      Shelf_Height_Spacing_mm: simInput?.shelfHeightSpacingMm ?? 1300,
+      Shelf_Height_Spacing_mm: derivedRackLevelHeightMm,
       Position_Spacing_mm: simInput?.positionSpacingMm ?? 950,
       Aisles: geometry.aisleCount,
-      Levels: simInput?.rackLevels ?? 3,
+      Levels: rackLevels,
     },
     Ground_Stacking_Configuration: {
       Box_Dimensions: {
-        Length_mm: 1200,
-        Width_mm: 800,
-        Height_mm: 1000,
+        Length_mm: groundDefaults.boxLengthMm,
+        Width_mm: groundDefaults.boxWidthMm,
+        Height_mm: derivedStackLevelHeightMm,
       },
       Storage_Area_Dimensions: {
         Length_mm: 15000,
         Width_mm: 10000,
       },
       Fork_Entry_Side: 'Length',
-      Clearance_mm: 200,
-      Rows: simInput?.stackingRows ?? 10,
-      Columns: simInput?.stackingColumns ?? 12,
-      Levels: simInput?.stackingLevels ?? 3,
+      Clearance_mm: groundDefaults.clearanceMm,
+      Rows: groundDefaults.rows,
+      Columns: groundDefaults.columns,
+      Levels: stackingLevels,
     },
     Throughput_Configuration: {
       Total_Daily_Pallets: totalDailyPallets,
@@ -310,6 +375,27 @@ export function compileSimulatorConfig(graph: SimGraph, settings?: AppSettings):
         rack_vehicle_type: rackVehicleType,
         storage_types_in_use: storageTypesInUse,
         force_explicit_handover: simInput?.forceExplicitHandover ?? false,
+        ground_storage_defaults: {
+          rows: groundDefaults.rows,
+          columns: groundDefaults.columns,
+          levels: groundDefaults.levels,
+          box_length_mm: groundDefaults.boxLengthMm,
+          box_width_mm: groundDefaults.boxWidthMm,
+          clearance_mm: groundDefaults.clearanceMm,
+          box_height_mm: groundDefaults.boxHeightMm,
+        },
+        ground_storage_nodes: groundDefaults.perNode.map((n) => ({
+          id: n.id,
+          storage_type: n.storageType,
+          rows: n.rows,
+          columns: n.columns,
+          levels: n.levels,
+          box_length_mm: n.boxLengthMm,
+          box_width_mm: n.boxWidthMm,
+          box_height_mm: n.boxHeightMm,
+          clearance_mm: n.clearanceMm,
+          storage_capacity: n.storageCapacity,
+        })),
         throughput_daily: {
           total: totalDailyPallets,
           inbound: inboundDailyPallets,

@@ -95,3 +95,5 @@ For a shared team setup:
 1. Deploy the backend API from the `age-warehouse-simulator` repo to your Cologne server.
 2. Set `VITE_SIMULATOR_API_BASE_URL=https://sim.your-domain.com`.
 3. Build and deploy this frontend to Vercel or another static host.
+
+See [DEPLOYMENT.md](/Users/arnabmitra/Documents/Codex/2026-05-05/can-you-help-me-with-my/warehouse-graph-ui/DEPLOYMENT.md) for a simple static-host deployment flow.

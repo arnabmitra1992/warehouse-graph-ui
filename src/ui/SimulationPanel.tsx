@@ -396,7 +396,7 @@ export function SimulationPanel() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
-                Active Storage Rows: {simResult?.storageTaskBreakdown?.length ?? 0}
+                Active Storage Nodes: {simResult?.storageTaskBreakdown?.length ?? 0}
               </div>
               <div className="bg-gray-900 rounded px-2 py-1 border border-gray-700">
                 Excluded Storages: {simResult?.diagnostics?.excludedStorages?.length ?? 0}
@@ -411,6 +411,9 @@ export function SimulationPanel() {
                   <tr>
                     <th className="px-2 py-1 text-left">Storage</th>
                     <th className="px-2 py-1 text-left">Aisle</th>
+                    <th className="px-2 py-1 text-left">Layout</th>
+                    <th className="px-2 py-1 text-left">Box (mm)</th>
+                    <th className="px-2 py-1 text-left">Cap</th>
                     <th className="px-2 py-1 text-left">Inbound</th>
                     <th className="px-2 py-1 text-left">Outbound</th>
                     <th className="px-2 py-1 text-left">In Branch</th>
@@ -426,6 +429,17 @@ export function SimulationPanel() {
                     <tr key={s.storageNodeId} className="border-t border-gray-700">
                       <td className="px-2 py-1 font-mono">{s.storageNodeId}</td>
                       <td className="px-2 py-1">#{s.aisleId ?? '—'}</td>
+                      <td className="px-2 py-1 font-mono">
+                        {s.blockRows && s.blockColumns
+                          ? `${s.blockRows}×${s.blockColumns}×${s.blockLevels ?? 1}`
+                          : '—'}
+                      </td>
+                      <td className="px-2 py-1 font-mono">
+                        {s.boxLengthMm && s.boxWidthMm
+                          ? `${s.boxLengthMm}×${s.boxWidthMm}`
+                          : '—'}
+                      </td>
+                      <td className="px-2 py-1 font-mono">{s.storageCapacity ?? '—'}</td>
                       <td className="px-2 py-1 font-mono">{s.inboundTasksPerDay}</td>
                       <td className="px-2 py-1 font-mono">{s.outboundTasksPerDay}</td>
                       <td className="px-2 py-1">{s.inboundBranch}</td>

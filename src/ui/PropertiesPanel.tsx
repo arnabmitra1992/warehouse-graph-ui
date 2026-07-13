@@ -124,13 +124,79 @@ function NodeProperties({
           <select
             className={inputCls()}
             value={data.storageType ?? (data.kind === 'rack_aisle' ? 'rack' : 'ground_storage')}
-            onChange={(e) => onUpdate({ storageType: e.target.value as NodeData['storageType'] })}
+            onChange={(e) => {
+              const nextType = e.target.value as NodeData['storageType']
+              onUpdate(
+                data.kind === 'ground_storage'
+                  ? {
+                      storageType: nextType,
+                      blockLevels: nextType === 'ground_storage' ? 1 : (data.blockLevels ?? 3),
+                    }
+                  : { storageType: nextType }
+              )
+            }}
           >
             <option value="rack">rack</option>
             <option value="ground_storage">ground_storage</option>
             <option value="ground_stacking">ground_stacking</option>
           </select>
         </Field>
+      )}
+      {data.kind === 'ground_storage' && (
+        <>
+          <Field label="Rows / Columns / Levels">
+            <div className="grid grid-cols-3 gap-1">
+              <input
+                className={inputCls()}
+                type="number"
+                min={1}
+                value={data.blockRows ?? 10}
+                onChange={(e) => onUpdate({ blockRows: parseInt(e.target.value || '0', 10) || 1 })}
+              />
+              <input
+                className={inputCls()}
+                type="number"
+                min={1}
+                value={data.blockColumns ?? 12}
+                onChange={(e) => onUpdate({ blockColumns: parseInt(e.target.value || '0', 10) || 1 })}
+              />
+              <input
+                className={inputCls()}
+                type="number"
+                min={1}
+                value={data.blockLevels ?? 3}
+                onChange={(e) => onUpdate({ blockLevels: parseInt(e.target.value || '0', 10) || 1 })}
+              />
+            </div>
+          </Field>
+          <Field label="Box Length / Width (mm)">
+            <div className="grid grid-cols-2 gap-1">
+              <input
+                className={inputCls()}
+                type="number"
+                min={100}
+                value={data.boxLengthMm ?? 1200}
+                onChange={(e) => onUpdate({ boxLengthMm: parseInt(e.target.value || '0', 10) || 1200 })}
+              />
+              <input
+                className={inputCls()}
+                type="number"
+                min={100}
+                value={data.boxWidthMm ?? 800}
+                onChange={(e) => onUpdate({ boxWidthMm: parseInt(e.target.value || '0', 10) || 800 })}
+              />
+            </div>
+          </Field>
+          <Field label="Clearance (mm)">
+            <input
+              className={inputCls()}
+              type="number"
+              min={0}
+              value={data.clearanceMm ?? 200}
+              onChange={(e) => onUpdate({ clearanceMm: parseInt(e.target.value || '0', 10) || 0 })}
+            />
+          </Field>
+        </>
       )}
       <button onClick={onDelete} className="text-xs bg-red-700 hover:bg-red-600 rounded px-2 py-1 self-start">
         Delete Node
@@ -238,6 +304,22 @@ function SimulatorInputs({
           <input className={inputCls()} type="number" min={1} value={sim.stackingLevels}
             onChange={(e) => onUpdate({ ...sim, stackingLevels: parseInt(e.target.value || '0', 10) || 1 })} />
         </div>
+      </Field>
+      )}
+      {(sim.storageTypesInUse.includes('ground_storage') || sim.storageTypesInUse.includes('ground_stacking')) && (
+      <Field label="Default Box Length / Width (mm)">
+        <div className="grid grid-cols-2 gap-1">
+          <input className={inputCls()} type="number" min={100} value={sim.stackingBoxLengthMm}
+            onChange={(e) => onUpdate({ ...sim, stackingBoxLengthMm: parseInt(e.target.value || '0', 10) || 1200 })} />
+          <input className={inputCls()} type="number" min={100} value={sim.stackingBoxWidthMm}
+            onChange={(e) => onUpdate({ ...sim, stackingBoxWidthMm: parseInt(e.target.value || '0', 10) || 800 })} />
+        </div>
+      </Field>
+      )}
+      {(sim.storageTypesInUse.includes('ground_storage') || sim.storageTypesInUse.includes('ground_stacking')) && (
+      <Field label="Default Block Clearance (mm)">
+        <input className={inputCls()} type="number" min={0} value={sim.stackingClearanceMm}
+          onChange={(e) => onUpdate({ ...sim, stackingClearanceMm: parseInt(e.target.value || '0', 10) || 0 })} />
       </Field>
       )}
       <Field label="Block Storage Policy">

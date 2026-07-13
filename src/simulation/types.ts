@@ -13,6 +13,12 @@ export interface SimNode {
   kind: string
   aisleId?: number
   storageType?: 'rack' | 'ground_storage' | 'ground_stacking'
+  blockRows?: number
+  blockColumns?: number
+  blockLevels?: number
+  boxLengthMm?: number
+  boxWidthMm?: number
+  clearanceMm?: number
 }
 
 export interface SimGraph {
@@ -62,6 +68,13 @@ export interface SimResult {
     inboundHandoverNodeId?: string
     outboundHandoverNodeId?: string
     storageMode?: 'rack' | 'ground_storage' | 'ground_stacking'
+    blockRows?: number
+    blockColumns?: number
+    blockLevels?: number
+    boxLengthMm?: number
+    boxWidthMm?: number
+    clearanceMm?: number
+    storageCapacity?: number
     inboundBranch: string
     outboundBranch: string
     inboundStorageSideBranch?: string

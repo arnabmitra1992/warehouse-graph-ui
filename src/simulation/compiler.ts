@@ -14,6 +14,12 @@ export function compileGraph(
       kind: n.data?.kind ?? 'turn',
       aisleId: n.data?.aisleId,
       storageType: n.data?.storageType,
+      blockRows: n.data?.blockRows,
+      blockColumns: n.data?.blockColumns,
+      blockLevels: n.data?.blockLevels,
+      boxLengthMm: n.data?.boxLengthMm,
+      boxWidthMm: n.data?.boxWidthMm,
+      clearanceMm: n.data?.clearanceMm,
     })),
     edges: edges.map(e => ({
       id: e.id,

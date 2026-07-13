@@ -40,6 +40,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     handoverNodeId?: string
     storageSideBranch?: 'XQE' | 'XPL' | 'XNA'
     cost: number
+    storageCapacity?: number
   }> = []
   const outboundCandidates: Array<{
     storageNodeId: string
@@ -48,6 +49,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     handoverNodeId?: string
     storageSideBranch?: 'XQE' | 'XPL' | 'XNA'
     cost: number
+    storageCapacity?: number
   }> = []
 
   const sourceGates = graph.nodes.filter((n) => n.kind === 'source_gate')
@@ -73,6 +75,39 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   const useGroundStorage = selectedStorageTypes.has('ground_storage')
   const useGroundStacking = selectedStorageTypes.has('ground_stacking')
   const forceExplicitHandover = !!sim?.forceExplicitHandover
+  const inferGroundNodeMode = (n: SimGraph['nodes'][number]): 'ground_storage' | 'ground_stacking' => {
+    if (useGroundStacking && !useGroundStorage) return 'ground_stacking'
+    if (useGroundStorage && !useGroundStacking) return 'ground_storage'
+    if (n.storageType === 'ground_stacking') return 'ground_stacking'
+    if (n.storageType === 'ground_storage') return 'ground_storage'
+    return 'ground_storage'
+  }
+  const resolveGroundNodeGeometry = (n: SimGraph['nodes'][number]) => {
+    const storageMode = inferGroundNodeMode(n)
+    const rows = Math.max(1, n.blockRows ?? sim?.stackingRows ?? 10)
+    const cols = Math.max(1, n.blockColumns ?? sim?.stackingColumns ?? 12)
+    const rawLevels = Math.max(1, n.blockLevels ?? sim?.stackingLevels ?? 3)
+    const levels = storageMode === 'ground_stacking' ? rawLevels : 1
+    const boxLengthMm = Math.max(100, n.boxLengthMm ?? sim?.stackingBoxLengthMm ?? 1200)
+    const boxWidthMm = Math.max(100, n.boxWidthMm ?? sim?.stackingBoxWidthMm ?? 800)
+    const clearanceMm = Math.max(0, n.clearanceMm ?? sim?.stackingClearanceMm ?? 200)
+    const effectiveWidthMm = boxWidthMm + 2 * clearanceMm
+    const effectiveDepthMm = boxLengthMm + 2 * clearanceMm
+    const avgColumnDistanceM = ((cols * effectiveWidthMm) / 2 + clearanceMm) / 1000
+    const avgRowDistanceM = ((rows * effectiveDepthMm) / 2 + clearanceMm) / 1000
+    const reverseIntoPositionM = (effectiveDepthMm / 2) / 1000
+    return {
+      storageMode,
+      rows,
+      cols,
+      levels,
+      boxLengthMm,
+      boxWidthMm,
+      clearanceMm,
+      averageInternalTravelM: avgColumnDistanceM + avgRowDistanceM + reverseIntoPositionM,
+      storageCapacity: rows * cols * levels,
+    }
+  }
   const isGroundNodeActive = (n: SimGraph['nodes'][number]) => {
     if (n.kind !== 'ground_storage') return false
     if (!useGroundStorage && !useGroundStacking) return false
@@ -142,15 +177,6 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   const useGround = useGroundStorage || useGroundStacking
   const inboundDaily = Math.max(0, Number.isFinite(sim?.inboundDailyPallets) ? (sim?.inboundDailyPallets as number) : 0)
   const outboundDaily = Math.max(0, Number.isFinite(sim?.outboundDailyPallets) ? (sim?.outboundDailyPallets as number) : 0)
-  const inferGroundNodeMode = (n: SimGraph['nodes'][number]): 'ground_storage' | 'ground_stacking' => {
-    // Global simulator mode should override legacy per-node defaults when the run
-    // is single-mode ground storage or single-mode ground stacking.
-    if (useGroundStacking && !useGroundStorage) return 'ground_stacking'
-    if (useGroundStorage && !useGroundStacking) return 'ground_storage'
-    if (n.storageType === 'ground_stacking') return 'ground_stacking'
-    if (n.storageType === 'ground_storage') return 'ground_storage'
-    return 'ground_storage'
-  }
 
   const buildStorageLegAdj = (aisleId: number) => buildAdj(graph.edges, e => {
     if (siteMode === 'XNA') {
@@ -383,6 +409,13 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
     inboundHandoverNodeId?: string
     outboundHandoverNodeId?: string
     storageMode: 'rack' | 'ground_storage' | 'ground_stacking'
+    blockRows?: number
+    blockColumns?: number
+    blockLevels?: number
+    boxLengthMm?: number
+    boxWidthMm?: number
+    clearanceMm?: number
+    storageCapacity?: number
     inboundHandover: boolean
     outboundHandover: boolean
     inboundBranch: string
@@ -393,6 +426,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
   const inboundRouteLoad = new Map<number, number>()
   const outboundRouteLoad = new Map<number, number>()
   const activeStorageNodes = graph.nodes.filter((n) => isGroundNodeActive(n) || isRackNodeActive(n))
+  const activeStorageNodeById = new Map(activeStorageNodes.map((n) => [n.id, n] as const))
   {
     const existingInbound = new Set(inboundCandidates.map((d) => d.storageNodeId))
     const existingOutbound = new Set(outboundCandidates.map((d) => d.storageNodeId))
@@ -409,7 +443,8 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
         continue
       }
       const chosenInboundSourceId = nearestSourceToStorage?.sourceId ?? sourceGates[0].id
-      const inferredMode = n.kind === 'ground_storage' ? inferGroundNodeMode(n) : 'rack'
+      const groundGeometry = n.kind === 'ground_storage' ? resolveGroundNodeGeometry(n) : null
+      const inferredMode = groundGeometry?.storageMode ?? 'rack'
       const directBranch: 'XQE' | 'XPL' | 'XNA' =
         inferredMode === 'ground_storage' ? 'XPL' : (n.kind === 'rack_aisle' && siteMode === 'XNA' ? 'XNA' : 'XQE')
       const bestOutbound = distFromOutboundByGate.length > 0
@@ -464,10 +499,11 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
             branch: 'XPL',
             handoverNodeId: hoId,
             storageSideBranch: storageSideBranch,
-            cost: Math.max(1, restToHo + sourceToHo + restToHo + restToStorage + hoToStorage + restToStorage),
+            cost: Math.max(1, restToHo + sourceToHo + restToHo + restToStorage + hoToStorage + (groundGeometry?.averageInternalTravelM ?? 0) + restToStorage),
+            storageCapacity: groundGeometry?.storageCapacity ?? 1,
           })
         } else {
-          const inboundCost = (allDistFromRest.get(chosenInboundSourceId) ?? 0) + sourceDist + (allDistFromRest.get(n.id) ?? 0)
+          const inboundCost = (allDistFromRest.get(chosenInboundSourceId) ?? 0) + sourceDist + (groundGeometry?.averageInternalTravelM ?? 0) + (allDistFromRest.get(n.id) ?? 0)
           inboundCandidates.push({
             storageNodeId: n.id,
             aisleId: nodeAisleId.get(n.id),
@@ -475,6 +511,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
             handoverNodeId: undefined,
             storageSideBranch: directBranch,
             cost: Math.max(1, inboundCost),
+            storageCapacity: groundGeometry?.storageCapacity ?? 1,
           })
         }
       }
@@ -492,10 +529,11 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
             branch: storageSideBranch,
             handoverNodeId: hoId,
             storageSideBranch: storageSideBranch,
-            cost: Math.max(1, restToStorage + hoToStorage + restToStorage + restToHo + (Number.isFinite(bestOutboundDist) ? bestOutboundDist : 0) + restToHo),
+            cost: Math.max(1, restToStorage + (groundGeometry?.averageInternalTravelM ?? 0) + hoToStorage + restToStorage + restToHo + (Number.isFinite(bestOutboundDist) ? bestOutboundDist : 0) + restToHo),
+            storageCapacity: groundGeometry?.storageCapacity ?? 1,
           })
         } else {
-          const outboundCost = (allDistFromRest.get(n.id) ?? 0) + (Number.isFinite(bestOutbound) ? bestOutbound : 0) + (distFromOutboundByGate.length > 0 ? Number.isFinite(bestOutbound) ? bestOutbound : 0 : (allDistFromRest.get(n.id) ?? 0))
+          const outboundCost = (allDistFromRest.get(n.id) ?? 0) + (groundGeometry?.averageInternalTravelM ?? 0) + (Number.isFinite(bestOutbound) ? bestOutbound : 0) + (distFromOutboundByGate.length > 0 ? Number.isFinite(bestOutbound) ? bestOutbound : 0 : (allDistFromRest.get(n.id) ?? 0))
           outboundCandidates.push({
             storageNodeId: n.id,
             aisleId: nodeAisleId.get(n.id),
@@ -503,6 +541,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
             handoverNodeId: undefined,
             storageSideBranch: directBranch,
             cost: Math.max(1, outboundCost),
+            storageCapacity: groundGeometry?.storageCapacity ?? 1,
           })
         }
       }
@@ -543,6 +582,8 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
           cur.outboundStorageSideBranch = c.storageSideBranch
         }
       } else {
+        const node = activeStorageNodeById.get(c.storageNodeId)
+        const groundGeometry = node?.kind === 'ground_storage' ? resolveGroundNodeGeometry(node) : null
         storageTaskMap.set(c.storageNodeId, {
           tasksPerDay: 1,
           inboundTasksPerDay: direction === 'inbound' ? 1 : 0,
@@ -551,11 +592,14 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
           handoverNodeId: c.handoverNodeId,
           inboundHandoverNodeId: direction === 'inbound' ? c.handoverNodeId : undefined,
           outboundHandoverNodeId: direction === 'outbound' ? c.handoverNodeId : undefined,
-          storageMode: (() => {
-            const node = activeStorageNodes.find((n) => n.id === c.storageNodeId)
-            if (!node) return 'rack'
-            return node.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack'
-          })(),
+          storageMode: node?.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack',
+          blockRows: groundGeometry?.rows,
+          blockColumns: groundGeometry?.cols,
+          blockLevels: groundGeometry?.levels,
+          boxLengthMm: groundGeometry?.boxLengthMm,
+          boxWidthMm: groundGeometry?.boxWidthMm,
+          clearanceMm: groundGeometry?.clearanceMm,
+          storageCapacity: groundGeometry?.storageCapacity ?? c.storageCapacity ?? 1,
           inboundHandover: direction === 'inbound' ? !!c.handoverNodeId : false,
           outboundHandover: direction === 'outbound' ? !!c.handoverNodeId : false,
           inboundBranch: direction === 'inbound' ? c.branch : 'unknown',
@@ -574,7 +618,8 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
         const idx = Math.floor(rng() * candidates.length)
         const c = candidates[idx]
         const load = c.aisleId != null ? (routeLoad.get(c.aisleId) ?? 0) : 0
-        const score = c.cost * (1 + load / 25)
+        const capacity = Math.max(1, c.storageCapacity ?? 1)
+        const score = (c.cost / Math.sqrt(capacity)) * (1 + load / capacity)
         if (score < bestScore) {
           bestScore = score
           best = c
@@ -598,6 +643,8 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
           cur.outboundStorageSideBranch = c.storageSideBranch
         }
       } else {
+        const node = activeStorageNodeById.get(c.storageNodeId)
+        const groundGeometry = node?.kind === 'ground_storage' ? resolveGroundNodeGeometry(node) : null
         storageTaskMap.set(c.storageNodeId, {
           tasksPerDay: 1,
           inboundTasksPerDay: direction === 'inbound' ? 1 : 0,
@@ -606,11 +653,14 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
           handoverNodeId: c.handoverNodeId,
           inboundHandoverNodeId: direction === 'inbound' ? c.handoverNodeId : undefined,
           outboundHandoverNodeId: direction === 'outbound' ? c.handoverNodeId : undefined,
-          storageMode: (() => {
-            const node = activeStorageNodes.find((n) => n.id === c.storageNodeId)
-            if (!node) return 'rack'
-            return node.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack'
-          })(),
+          storageMode: node?.kind === 'ground_storage' ? inferGroundNodeMode(node) : 'rack',
+          blockRows: groundGeometry?.rows,
+          blockColumns: groundGeometry?.cols,
+          blockLevels: groundGeometry?.levels,
+          boxLengthMm: groundGeometry?.boxLengthMm,
+          boxWidthMm: groundGeometry?.boxWidthMm,
+          clearanceMm: groundGeometry?.clearanceMm,
+          storageCapacity: groundGeometry?.storageCapacity ?? c.storageCapacity ?? 1,
           inboundHandover: direction === 'inbound' ? !!c.handoverNodeId : false,
           outboundHandover: direction === 'outbound' ? !!c.handoverNodeId : false,
           inboundBranch: direction === 'inbound' ? c.branch : 'unknown',
@@ -697,6 +747,13 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       inboundHandoverNodeId: v.inboundHandoverNodeId,
       outboundHandoverNodeId: v.outboundHandoverNodeId,
       storageMode: v.storageMode,
+      blockRows: v.blockRows,
+      blockColumns: v.blockColumns,
+      blockLevels: v.blockLevels,
+      boxLengthMm: v.boxLengthMm,
+      boxWidthMm: v.boxWidthMm,
+      clearanceMm: v.clearanceMm,
+      storageCapacity: v.storageCapacity,
       inboundStorageSideBranch: v.inboundStorageSideBranch,
       outboundStorageSideBranch: v.outboundStorageSideBranch,
       inboundBranch: v.inboundHandover

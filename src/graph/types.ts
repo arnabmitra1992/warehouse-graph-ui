@@ -3,6 +3,12 @@ export interface NodeData {
   label?: string
   aisleId?: number
   storageType?: 'rack' | 'ground_storage' | 'ground_stacking'
+  blockRows?: number
+  blockColumns?: number
+  blockLevels?: number
+  boxLengthMm?: number
+  boxWidthMm?: number
+  clearanceMm?: number
 }
 
 export interface EdgeData {
@@ -46,6 +52,9 @@ export interface SimulatorInputs {
   stackingRows: number
   stackingColumns: number
   stackingLevels: number
+  stackingBoxLengthMm: number
+  stackingBoxWidthMm: number
+  stackingClearanceMm: number
   blockStoragePolicy: 'fifo' | 'lane_sequence' | 'column_fifo'
   trafficControlEnabled: boolean
   intersectionCount: number
