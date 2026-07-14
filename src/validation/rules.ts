@@ -268,6 +268,20 @@ export function validateGraph(
         .map((n) => minDistance(distAllFromAnySGMaps, n.id))
         .filter((d): d is number => d != null)
         .reduce((min, d) => Math.min(min, d), Number.POSITIVE_INFINITY)
+      const allowedStorageEdges = edges.filter(e =>
+        (e.data?.preset !== 'rack_aisle' && e.data?.preset !== 'storage_aisle') || e.data?.aisleId === aisleId
+      )
+      const storageLegAdj = (() => {
+        if (siteMode === 'XQE') {
+          return buildAdjacency(allowedStorageEdges.filter(e => (e.data?.widthM ?? 0) >= 2.84), 2.84)
+        }
+        return buildAdjacency(allowedStorageEdges.filter(e => {
+          if (e.data?.preset === 'rack_aisle') {
+            return e.data.aisleId === aisleId && e.data.widthM >= 1.75 && e.data.widthM <= 1.80
+          }
+          return (e.data?.widthM ?? 0) >= 4.0
+        }))
+      })()
       const aisleTaggedHandovers = allHandovers.filter((h) => h.data?.aisleId === aisleId)
       const explicitHandoverRequested =
         forceExplicitHandover &&
@@ -291,7 +305,12 @@ export function validateGraph(
       const shared = allHandovers.filter((h) => h.data?.aisleId == null)
       const preferred = aisleTagged.length > 0 ? aisleTagged : shared
       const candidates = preferred.length > 0 ? preferred : allHandovers
-      const candidate = candidates
+      const feasibleCandidates = candidates.filter((h) => {
+        const stDist = dijkstra(storageLegAdj, h.id)
+        return aisleStorageNodes.some((n) => stDist.has(n.id))
+      })
+      const candidatePool = feasibleCandidates.length > 0 ? feasibleCandidates : candidates
+      const candidate = candidatePool
         .map((h) => ({ h, d: minDistance(distFromAnySGMaps, h.id) }))
         .filter((x): x is { h: (typeof candidates)[number]; d: number } => x.d != null)
         .sort((a, b) => a.d - b.d)[0]
@@ -332,14 +351,8 @@ export function validateGraph(
 
       // Storage leg feasibility
       for (const rackNode of aisleStorageNodes) {
-        // Build adj for storage leg: non-storage travel network plus same-aisle storage edges.
-        const allowedEdges = edges.filter(e =>
-          (e.data?.preset !== 'rack_aisle' && e.data?.preset !== 'storage_aisle') || e.data?.aisleId === aisleId
-        )
-
         if (siteMode === 'XQE') {
-          const stAdj = buildAdjacency(allowedEdges.filter(e => (e.data?.widthM ?? 0) >= 2.84), 2.84)
-          const stDist = dijkstra(stAdj, ho.id)
+          const stDist = dijkstra(storageLegAdj, ho.id)
           if (!stDist.has(rackNode.id)) {
             issues.push({
               code: 'E-ST-010',
@@ -349,15 +362,7 @@ export function validateGraph(
             })
           }
         } else if (siteMode === 'XNA') {
-          // XNA: non-storage travel edges width >= 4.0, and only same-aisle rack_aisle edges may be 1.75-1.80.
-          const xnaStorageEdges = allowedEdges.filter(e => {
-            if (e.data?.preset === 'rack_aisle') {
-              return e.data.aisleId === aisleId && e.data.widthM >= 1.75 && e.data.widthM <= 1.80
-            }
-            return (e.data?.widthM ?? 0) >= 4.0
-          })
-          const stAdj = buildAdjacency(xnaStorageEdges)
-          const stDist = dijkstra(stAdj, ho.id)
+          const stDist = dijkstra(storageLegAdj, ho.id)
           if (!stDist.has(rackNode.id)) {
             issues.push({
               code: 'E-ST-011',
