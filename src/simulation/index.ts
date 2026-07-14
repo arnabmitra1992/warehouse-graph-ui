@@ -180,7 +180,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
 
   const buildStorageLegAdj = (aisleId: number) => buildAdj(graph.edges, e => {
     if (siteMode === 'XNA') {
-      if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') {
+      if (e.preset === 'rack_aisle') {
         return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
       }
       return e.widthM >= 4.0
@@ -281,7 +281,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       let rackPath: PathResult | undefined
       const rackAdj = buildAdj(graph.edges, e => {
         if (siteMode === 'XNA') {
-          if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
+          if (e.preset === 'rack_aisle') return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
           return e.widthM >= 4.0
         }
         if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') return e.aisleId === aisleId && e.widthM >= 2.84
@@ -359,7 +359,7 @@ export function runSimulation(graph: SimGraph, settings?: AppSettings): SimResul
       }
     } else if (siteMode === 'XNA') {
       const rackAdj = buildAdj(graph.edges, e => {
-        if (e.preset === 'rack_aisle' || e.preset === 'storage_aisle') return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
+        if (e.preset === 'rack_aisle') return e.aisleId === aisleId && e.widthM >= 1.75 && e.widthM <= 1.80
         return e.widthM >= 4.0
       })
       const {dist: rDist, prev: rPrev} = dijkstra(rackAdj, handoverNode.id)

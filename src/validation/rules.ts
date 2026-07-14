@@ -309,7 +309,7 @@ export function validateGraph(
         issues.push({
           code: 'E-HO-010',
           severity: 'error',
-          message: `handover_${aisleId} must be reachable from source_gate using non-rack edges only (no rack_aisle edges).`,
+          message: `handover_${aisleId} must be reachable from source_gate using the non-storage network only (no rack_aisle or storage_aisle edges).`,
           nodeIds: [ho.id],
         })
         continue
@@ -332,7 +332,7 @@ export function validateGraph(
 
       // Storage leg feasibility
       for (const rackNode of aisleStorageNodes) {
-        // Build adj for storage leg: non-rack edges + rack_aisle edges with matching aisleId
+        // Build adj for storage leg: non-storage travel network plus same-aisle storage edges.
         const allowedEdges = edges.filter(e =>
           (e.data?.preset !== 'rack_aisle' && e.data?.preset !== 'storage_aisle') || e.data?.aisleId === aisleId
         )
@@ -344,12 +344,12 @@ export function validateGraph(
             issues.push({
               code: 'E-ST-010',
               severity: 'error',
-              message: `Aisle ${aisleId}: no feasible XQE path handover\u2192rack_aisle_${aisleId} (requires width \u2265 2.84m; rack_aisle edges from other aisles are not allowed).`,
+              message: `Aisle ${aisleId}: no feasible XQE storage path handover\u2192aisle_${aisleId} (requires width \u2265 2.84m; only same-aisle rack_aisle/storage_aisle edges may be used on the storage leg).`,
               nodeIds: [ho.id, rackNode.id],
             })
           }
         } else if (siteMode === 'XNA') {
-          // XNA: non-rack edges width >= 4.0, rack edges 1.75-1.80 with matching aisleId
+          // XNA: non-storage travel edges width >= 4.0, and only same-aisle rack_aisle edges may be 1.75-1.80.
           const xnaStorageEdges = allowedEdges.filter(e => {
             if (e.data?.preset === 'rack_aisle') {
               return e.data.aisleId === aisleId && e.data.widthM >= 1.75 && e.data.widthM <= 1.80
@@ -362,7 +362,7 @@ export function validateGraph(
             issues.push({
               code: 'E-ST-011',
               severity: 'error',
-              message: `Aisle ${aisleId}: no feasible XNA path handover\u2192rack_aisle_${aisleId} (non-rack width \u2265 4.00m; rack_aisle width must be 1.75\u20131.80m; other-aisle rack edges not allowed).`,
+              message: `Aisle ${aisleId}: no feasible XNA storage path handover\u2192rack_aisle_${aisleId} (non-storage travel edges must be \u2265 4.00m; same-aisle rack_aisle width must be 1.75\u20131.80m; storage_aisle is not valid for XNA).`,
               nodeIds: [ho.id, rackNode.id],
             })
           }
