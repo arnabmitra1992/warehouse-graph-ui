@@ -80,7 +80,11 @@ src/
 npm run deploy
 ```
 
-Make sure the repo's **Pages** source is set to the `gh-pages` branch in GitHub → Settings → Pages.
+This repo also supports automatic GitHub Pages deployment through GitHub Actions on every push to `main`.
+
+For automatic deployment, set the repo's **Pages** source to **GitHub Actions** in GitHub → Settings → Pages.
+
+If you prefer manual publishing, `npm run deploy` still pushes `dist/` to the `gh-pages` branch.
 
 For GitHub Pages specifically, set:
 

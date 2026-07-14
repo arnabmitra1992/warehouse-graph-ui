@@ -45,6 +45,18 @@ Any static host works:
 - company nginx server
 - company Apache server
 
+### GitHub Pages automatic deployment
+
+This repo includes a GitHub Actions workflow at `.github/workflows/deploy-pages.yml`.
+
+To enable it:
+
+1. Push the workflow to `main`
+2. In GitHub → **Settings** → **Pages**
+3. Set **Source** to **GitHub Actions**
+
+After that, every push to `main` will automatically build and publish the UI.
+
 ## 4. Example: upload to a company server with nginx
 
 Build locally, then copy the `dist/` contents to a directory on the server, for example:
